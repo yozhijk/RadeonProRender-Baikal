@@ -14,6 +14,7 @@
 #include <sstream>
 #include <map>
 #include <stack>
+#include <iostream>
 
 namespace Baikal
 {
@@ -513,6 +514,7 @@ namespace Baikal
                 continue;
 
             auto name = material->GetName();
+
             auto citer = mapping.find(name);
 
             if (citer != mapping.cend())

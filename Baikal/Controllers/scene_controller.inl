@@ -25,7 +25,8 @@ namespace Baikal
     inline
     CompiledScene& SceneController<CompiledScene>::CompileScene(
         Scene1 const& scene, Collector& mat_collector,
-        Collector& tex_collector) const
+        Collector& tex_collector,
+        bool clear_ditry_flags) const
     {
         // The overall approach is:
         // 1) Check if materials have changed, update collector if yes
@@ -167,7 +168,10 @@ namespace Baikal
             m_current_scene = &scene;
             
             // Drop all dirty flags for the scene
-            scene.ClearDirtyFlags();
+            if (clear_ditry_flags)
+            {
+                scene.ClearDirtyFlags();
+            }
             
             // Drop dirty flags for materials
             mat_collector.Finalize([](void const* item)
@@ -200,6 +204,11 @@ namespace Baikal
             if (dirty & Scene1::kCamera || camera_changed)
             {
                 UpdateCamera(scene, mat_collector, tex_collector, out);
+
+                if (clear_ditry_flags)
+                {
+                    camera->SetDirty(false);
+                }
             }
             
             {
@@ -231,6 +240,11 @@ namespace Baikal
                 if (dirty & Scene1::kLights || lights_changed)
                 {
                     UpdateLights(scene, mat_collector, tex_collector, out);
+
+                    if (clear_ditry_flags)
+                    {
+                        DropDirties(light_iter.get());
+                    }
                 }
             }
             
@@ -261,6 +275,11 @@ namespace Baikal
                 if (dirty & Scene1::kShapes || shapes_changed)
                 {
                     UpdateShapes(scene, mat_collector, tex_collector, out);
+
+                    if (clear_ditry_flags)
+                    {
+                        DropDirties(shape_iter.get());
+                    }
                 }
             }
             
@@ -276,6 +295,12 @@ namespace Baikal
                                           ))
             {
                 UpdateMaterials(scene, mat_collector, tex_collector, out);
+
+                if (clear_ditry_flags)
+                {
+                    auto mat_iter = mat_collector.CreateIterator();
+                    DropDirties(mat_iter.get());
+                }
             }
             
             // If textures need an update, do it.
@@ -286,6 +311,12 @@ namespace Baikal
                 return tex->IsDirty(); })))
             {
                 UpdateTextures(scene, mat_collector, tex_collector, out);
+
+                if (clear_ditry_flags)
+                {
+                    auto tex_iter = tex_collector.CreateIterator();
+                    DropDirties(tex_iter.get());
+                }
             }
             
             // Set current scene
@@ -297,7 +328,10 @@ namespace Baikal
             }
             
             // Make sure to clear dirty flags
-            scene.ClearDirtyFlags();
+            if (clear_ditry_flags)
+            {
+                scene.ClearDirtyFlags();
+            }
             
             // Clear material dirty flags
             mat_collector.Finalize([](void const* item)
@@ -324,5 +358,94 @@ namespace Baikal
         UpdateMaterials(scene, mat_collector, tex_collector, out);
         
         UpdateTextures(scene, mat_collector, tex_collector, out);
+    }
+
+    template <typename CompiledScene>
+    inline 
+    void SceneController<CompiledScene>::SplitMeshesAndInstances(Iterator* shape_iter, std::set<Mesh const*>& meshes, std::set<Instance const*>& instances, std::set<Mesh const*>& excluded_meshes) const
+    {
+        // Clear all sets
+        meshes.clear();
+        instances.clear();
+        excluded_meshes.clear();
+
+        // Prepare instance check lambda
+        auto is_instance = [](Shape const* shape)
+        {
+            if (dynamic_cast<Instance const*>(shape))
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        };
+
+        for (; shape_iter->IsValid(); shape_iter->Next())
+        {
+            auto shape = shape_iter->ItemAs<Shape const>();
+
+            if (!is_instance(shape))
+            {
+                meshes.emplace(static_cast<Mesh const*>(shape));
+            }
+            else
+            {
+                instances.emplace(static_cast<Instance const*>(shape));
+            }
+        }
+
+        for (auto& i : instances)
+        {
+            auto base_mesh = static_cast<Mesh const*>(i->GetBaseShape());
+            if (meshes.find(base_mesh) == meshes.cend())
+            {
+                excluded_meshes.emplace(base_mesh);
+            }
+        }
+    }
+
+    template <typename CompiledScene>
+    inline
+    std::size_t  SceneController<CompiledScene>::GetShapeIdx(Iterator* shape_iter, Shape const* shape) const
+    {
+        std::set<Mesh const*> meshes;
+        std::set<Mesh const*> excluded_meshes;
+        std::set<Instance const*> instances;
+        SplitMeshesAndInstances(shape_iter, meshes, instances, excluded_meshes);
+
+        std::size_t idx = 0;
+        for (auto& i : meshes)
+        {
+            if (i == shape)
+            {
+                return idx;
+            }
+
+            ++idx;
+        }
+
+        for (auto& i : excluded_meshes)
+        {
+            if (i == shape)
+            {
+                return idx;
+            }
+
+            ++idx;
+        }
+
+        for (auto& i : instances)
+        {
+            if (i == shape)
+            {
+                return idx;
+            }
+
+            ++idx;
+        }
+
+        return -1;
     }
 }

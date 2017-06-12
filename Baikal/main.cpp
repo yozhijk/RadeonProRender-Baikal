@@ -70,6 +70,7 @@ THE SOFTWARE.
 #include "RenderFactory/render_factory.h"
 #include "Renderers/ptrenderer.h"
 #include "Renderers/bdptrenderer.h"
+#include "Renderers/rsrenderer.h"
 #include "SceneGraph/scene1.h"
 #include "SceneGraph/camera.h"
 #include "SceneGraph/material.h"
@@ -77,6 +78,7 @@ THE SOFTWARE.
 #include "SceneGraph/IO/material_io.h"
 #include "SceneGraph/material.h"
 #include "Output/clwoutput.h"
+#include "Output/gloutput.h"
 #include "Utils/shader_manager.h"
 #include "Utils/config_manager.h"
 #include "Utils/tiny_obj_loader.h"
@@ -137,15 +139,11 @@ bool g_time_benchmarked = false;
 bool g_rt_benchmarked = false;
 bool g_time_benchmark = false;
 float g_time_benchmark_time = 0.f;
+bool g_raster = true;
 
 decltype(std::chrono::high_resolution_clock::now()) g_time_bench_start_time;
 
-
-
 using namespace tinyobj;
-
-#define CHECK_GL_ERROR assert(glGetError() == 0)
-
 
 struct OutputData
 {
@@ -223,27 +221,40 @@ void Render(GLFWwindow* window)
 
             glUniform1i(texloc, 0); CHECK_GL_ERROR;
 
-            glActiveTexture(GL_TEXTURE0); CHECK_GL_ERROR;
-            glBindTexture(GL_TEXTURE_2D, g_texture); CHECK_GL_ERROR;
+            auto texture = g_texture;
 
+            if (g_raster)
+            {
+                auto output = reinterpret_cast<Baikal::GlOutput*>(g_outputs[g_primary].output.get());
 
-            glEnableVertexAttribArray(0); CHECK_GL_ERROR;
-            glEnableVertexAttribArray(1); CHECK_GL_ERROR;
+                glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0); CHECK_GL_ERROR;
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, reinterpret_cast<Baikal::GlOutput*>(g_outputs[g_primary].output.get())->GetGlFramebuffer()); CHECK_GL_ERROR;
+                glDrawBuffer(GL_BACK); CHECK_GL_ERROR;
+                glBlitFramebuffer(0, 0, output->width(), output->height(), 0, 0, output->width(), output->height(), GL_COLOR_BUFFER_BIT, GL_NEAREST); CHECK_GL_ERROR;
+            }
+            else
+            {
+                glActiveTexture(GL_TEXTURE0); CHECK_GL_ERROR;
+                glBindTexture(GL_TEXTURE_2D, g_texture); CHECK_GL_ERROR;
 
-            glBindBuffer(GL_ARRAY_BUFFER, g_vertex_buffer); CHECK_GL_ERROR;
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_index_buffer); CHECK_GL_ERROR;
+                GLuint position_attr = glGetAttribLocation(program, "inPosition"); CHECK_GL_ERROR;
+                GLuint texcoord_attr = glGetAttribLocation(program, "inTexcoord"); CHECK_GL_ERROR;
 
-            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 5, 0); CHECK_GL_ERROR;
-            glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 5, (void*)(sizeof(float) * 3)); CHECK_GL_ERROR;
-            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr);
+                glVertexAttribPointer(position_attr, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 5, 0); CHECK_GL_ERROR;
+                glVertexAttribPointer(texcoord_attr, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 5, (void*)(sizeof(float) * 3)); CHECK_GL_ERROR;
 
-            glDisableVertexAttribArray(0); CHECK_GL_ERROR;
-            glDisableVertexAttribArray(1); CHECK_GL_ERROR;
-            glBindTexture(GL_TEXTURE_2D, 0); CHECK_GL_ERROR;
-            glBindBuffer(GL_ARRAY_BUFFER, 0); CHECK_GL_ERROR;
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0); CHECK_GL_ERROR;
-            glUseProgram(0); CHECK_GL_ERROR;
-            glBindVertexArray(0);
+                glEnableVertexAttribArray(position_attr); CHECK_GL_ERROR;
+                glEnableVertexAttribArray(texcoord_attr); CHECK_GL_ERROR;
+
+                glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr);
+                CHECK_GL_ERROR;
+
+                glDisableVertexAttribArray(texcoord_attr); CHECK_GL_ERROR;
+                glBindTexture(GL_TEXTURE_2D, 0); CHECK_GL_ERROR;
+                glBindBuffer(GL_ARRAY_BUFFER, 0); CHECK_GL_ERROR;
+                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0); CHECK_GL_ERROR;
+                glUseProgram(0); CHECK_GL_ERROR;
+            }
 
             glFinish(); CHECK_GL_ERROR;
         }
@@ -665,88 +676,91 @@ void Update(bool update_required)
 
     //if (std::chrono::duration_cast<std::chrono::seconds>(time - updatetime).count() > 1)
     //{
-    for (int i = 0; i < g_cfgs.size(); ++i)
+    if (!g_raster)
     {
-        if (g_cfgs[i].type == ConfigManager::kPrimary)
-            continue;
-
-        int desired = 1;
-        if (std::atomic_compare_exchange_strong(&g_ctrl[i].newdata, &desired, 0))
+        for (int i = 0; i < g_cfgs.size(); ++i)
         {
+            if (g_cfgs[i].type == ConfigManager::kPrimary)
+                continue;
+
+            int desired = 1;
+            if (std::atomic_compare_exchange_strong(&g_ctrl[i].newdata, &desired, 0))
             {
-                //std::unique_lock<std::mutex> lock(g_ctrl[i].datamutex);
-                //std::cout << "Start updating acc buffer\n"; std::cout.flush();
-                g_cfgs[g_primary].context.WriteBuffer(0, g_outputs[g_primary].copybuffer, &g_outputs[i].fdata[0], g_window_width * g_window_height);
-                //std::cout << "Finished updating acc buffer\n"; std::cout.flush();
+                {
+                    //std::unique_lock<std::mutex> lock(g_ctrl[i].datamutex);
+                    //std::cout << "Start updating acc buffer\n"; std::cout.flush();
+                    g_cfgs[g_primary].context.WriteBuffer(0, g_outputs[g_primary].copybuffer, &g_outputs[i].fdata[0], g_window_width * g_window_height);
+                    //std::cout << "Finished updating acc buffer\n"; std::cout.flush();
+                }
+
+                CLWKernel acckernel = static_cast<Baikal::PtRenderer*>(g_cfgs[g_primary].renderer.get())->GetAccumulateKernel();
+
+                int argc = 0;
+                acckernel.SetArg(argc++, g_outputs[g_primary].copybuffer);
+                acckernel.SetArg(argc++, g_window_width * g_window_width);
+                acckernel.SetArg(argc++, static_cast<Baikal::ClwOutput*>(g_outputs[g_primary].output.get())->data());
+
+                int globalsize = g_window_width * g_window_height;
+                g_cfgs[g_primary].context.Launch1D(0, ((globalsize + 63) / 64) * 64, 64, acckernel);
+            }
+        }
+
+        //updatetime = time;
+        //}
+
+        if (!g_interop)
+        {
+#ifdef ENABLE_DENOISER
+            g_outputs[g_primary].output_denoised->GetData(&g_outputs[g_primary].fdata[0]);
+#else
+            g_outputs[g_primary].output->GetData(&g_outputs[g_primary].fdata[0]);
+#endif
+
+            float gamma = 2.2f;
+            for (int i = 0; i < (int)g_outputs[g_primary].fdata.size(); ++i)
+            {
+                g_outputs[g_primary].udata[4 * i] = (unsigned char)clamp(clamp(pow(g_outputs[g_primary].fdata[i].x / g_outputs[g_primary].fdata[i].w, 1.f / gamma), 0.f, 1.f) * 255, 0, 255);
+                g_outputs[g_primary].udata[4 * i + 1] = (unsigned char)clamp(clamp(pow(g_outputs[g_primary].fdata[i].y / g_outputs[g_primary].fdata[i].w, 1.f / gamma), 0.f, 1.f) * 255, 0, 255);
+                g_outputs[g_primary].udata[4 * i + 2] = (unsigned char)clamp(clamp(pow(g_outputs[g_primary].fdata[i].z / g_outputs[g_primary].fdata[i].w, 1.f / gamma), 0.f, 1.f) * 255, 0, 255);
+                g_outputs[g_primary].udata[4 * i + 3] = 1;
             }
 
-            CLWKernel acckernel = static_cast<Baikal::PtRenderer*>(g_cfgs[g_primary].renderer.get())->GetAccumulateKernel();
+
+            glActiveTexture(GL_TEXTURE0);
+
+            glBindTexture(GL_TEXTURE_2D, g_texture);
+
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, g_outputs[g_primary].output->width(), g_outputs[g_primary].output->height(), GL_RGBA, GL_UNSIGNED_BYTE, &g_outputs[g_primary].udata[0]);
+
+            glBindTexture(GL_TEXTURE_2D, 0);
+        }
+        else
+        {
+            std::vector<cl_mem> objects;
+            objects.push_back(g_cl_interop_image);
+            g_cfgs[g_primary].context.AcquireGLObjects(0, objects);
+
+            CLWKernel copykernel = static_cast<Baikal::PtRenderer*>(g_cfgs[g_primary].renderer.get())->GetCopyKernel();
+
+#ifdef ENABLE_DENOISER
+            auto output = g_outputs[g_primary].output_denoised;
+#else
+            auto output = g_outputs[g_primary].output.get();
+#endif
 
             int argc = 0;
-            acckernel.SetArg(argc++, g_outputs[g_primary].copybuffer);
-            acckernel.SetArg(argc++, g_window_width * g_window_width);
-            acckernel.SetArg(argc++, static_cast<Baikal::ClwOutput*>(g_outputs[g_primary].output.get())->data());
+            copykernel.SetArg(argc++, static_cast<Baikal::ClwOutput*>(output)->data());
+            copykernel.SetArg(argc++, output->width());
+            copykernel.SetArg(argc++, output->height());
+            copykernel.SetArg(argc++, 2.2f);
+            copykernel.SetArg(argc++, g_cl_interop_image);
 
-            int globalsize = g_window_width * g_window_height;
-            g_cfgs[g_primary].context.Launch1D(0, ((globalsize + 63) / 64) * 64, 64, acckernel);
+            int globalsize = output->width() * output->height();
+            g_cfgs[g_primary].context.Launch1D(0, ((globalsize + 63) / 64) * 64, 64, copykernel);
+
+            g_cfgs[g_primary].context.ReleaseGLObjects(0, objects);
+            g_cfgs[g_primary].context.Finish(0);
         }
-    }
-
-    //updatetime = time;
-    //}
-
-    if (!g_interop)
-    {
-#ifdef ENABLE_DENOISER
-        g_outputs[g_primary].output_denoised->GetData(&g_outputs[g_primary].fdata[0]);
-#else
-        g_outputs[g_primary].output->GetData(&g_outputs[g_primary].fdata[0]);
-#endif
-
-        float gamma = 2.2f;
-        for (int i = 0; i < (int)g_outputs[g_primary].fdata.size(); ++i)
-        {
-            g_outputs[g_primary].udata[4 * i] = (unsigned char)clamp(clamp(pow(g_outputs[g_primary].fdata[i].x / g_outputs[g_primary].fdata[i].w, 1.f / gamma), 0.f, 1.f) * 255, 0, 255);
-            g_outputs[g_primary].udata[4 * i + 1] = (unsigned char)clamp(clamp(pow(g_outputs[g_primary].fdata[i].y / g_outputs[g_primary].fdata[i].w, 1.f / gamma), 0.f, 1.f) * 255, 0, 255);
-            g_outputs[g_primary].udata[4 * i + 2] = (unsigned char)clamp(clamp(pow(g_outputs[g_primary].fdata[i].z / g_outputs[g_primary].fdata[i].w, 1.f / gamma), 0.f, 1.f) * 255, 0, 255);
-            g_outputs[g_primary].udata[4 * i + 3] = 1;
-        }
-
-
-        glActiveTexture(GL_TEXTURE0);
-
-        glBindTexture(GL_TEXTURE_2D, g_texture);
-
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, g_outputs[g_primary].output->width(), g_outputs[g_primary].output->height(), GL_RGBA, GL_UNSIGNED_BYTE, &g_outputs[g_primary].udata[0]);
-
-        glBindTexture(GL_TEXTURE_2D, 0);
-    }
-    else
-    {
-        std::vector<cl_mem> objects;
-        objects.push_back(g_cl_interop_image);
-        g_cfgs[g_primary].context.AcquireGLObjects(0, objects);
-
-        CLWKernel copykernel = static_cast<Baikal::PtRenderer*>(g_cfgs[g_primary].renderer.get())->GetCopyKernel();
-
-#ifdef ENABLE_DENOISER
-        auto output = g_outputs[g_primary].output_denoised;
-#else
-        auto output = g_outputs[g_primary].output.get();
-#endif
-
-        int argc = 0;
-        copykernel.SetArg(argc++, static_cast<Baikal::ClwOutput*>(output)->data());
-        copykernel.SetArg(argc++, output->width());
-        copykernel.SetArg(argc++, output->height());
-        copykernel.SetArg(argc++, 2.2f);
-        copykernel.SetArg(argc++, g_cl_interop_image);
-
-        int globalsize = output->width() * output->height();
-        g_cfgs[g_primary].context.Launch1D(0, ((globalsize + 63) / 64) * 64, 64, copykernel);
-
-        g_cfgs[g_primary].context.ReleaseGLObjects(0, objects);
-        g_cfgs[g_primary].context.Finish(0);
     }
 
 

@@ -45,19 +45,21 @@ namespace Baikal
         {
             kUnidirectionalPathTracer
         };
-        
+
         enum class PostEffectType
         {
             kBilateralDenoiser
         };
-        
+
         static std::unique_ptr<RenderFactory> CreateClwRenderFactory(
                                                             CLWContext context,
                                                             int device_index);
-        
+
+        static std::unique_ptr<RenderFactory> CreateGlRenderFactory();
+
         RenderFactory() = default;
         virtual ~RenderFactory() = default;
-        
+
         // Create a renderer of specified type
         virtual std::unique_ptr<Renderer> CreateRenderer(RendererType type)
                                                                     const = 0;
@@ -67,7 +69,7 @@ namespace Baikal
         // Create post effect of specified type
         virtual std::unique_ptr<PostEffect> CreatePostEffect(
                                                 PostEffectType type) const = 0;
-        
+
         RenderFactory(RenderFactory const&) = delete;
         RenderFactory const& operator = (RenderFactory const&) = delete;
     };

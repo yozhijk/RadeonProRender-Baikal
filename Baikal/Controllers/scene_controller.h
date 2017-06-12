@@ -30,6 +30,7 @@
 
 #include <memory>
 #include <map>
+#include <set>
 
 namespace Baikal
 {
@@ -39,7 +40,10 @@ namespace Baikal
     class Material;
     class Light;
     class Texture;
-    
+    class Iterator;
+    class Instance;
+    class Mesh;
+    class Shape;
     
     /**
      \brief Tracks changes of a scene and serialized data if needed.
@@ -56,13 +60,17 @@ namespace Baikal
         virtual ~SceneController() = default;
         
         // Given a scene this method produces (or loads from cache) corresponding GPU representation.
-        CompiledScene& CompileScene(Scene1 const& scene, Collector& mat_collector, Collector& tex_collector) const;
+        CompiledScene& CompileScene(Scene1 const& scene, Collector& mat_collector, Collector& tex_collector, bool clear_ditry_flags = true) const;
         
     protected:
         // Recompile the scene from scratch, i.e. not loading from cache.
         // All the buffers are recreated and reloaded.
         void RecompileFull(Scene1 const& scene, Collector& mat_collector, Collector& tex_collector, CompiledScene& out) const;
-        
+
+        void SplitMeshesAndInstances(Iterator* shape_iter, std::set<Mesh const*>& meshes, std::set<Instance const*>& instances, std::set<Mesh const*>& excluded_meshes) const;
+
+        std::size_t GetShapeIdx(Iterator* shape_iter, Shape const* shape) const;
+
     private:
         // Update camera data only.
         virtual void UpdateCamera(Scene1 const& scene, Collector& mat_collector, Collector& tex_collector, CompiledScene& out) const = 0;
@@ -84,6 +92,15 @@ namespace Baikal
         // Scene cache map (CPU scene -> GPU scene mapping)
         mutable std::map<Scene1 const*, CompiledScene> m_scene_cache;
     };
+
+    template <typename Iterator> inline void DropDirties(Iterator* iter)
+    {
+        for (iter->Reset(); iter->IsValid(); iter->Next())
+        {
+            auto obj = iter->ItemAs<SceneObject const>();
+            obj->SetDirty(false);
+        }
+    }
 }
 
 #include "scene_controller.inl"

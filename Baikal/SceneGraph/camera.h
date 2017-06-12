@@ -30,6 +30,7 @@
 
 #include "math/float3.h"
 #include "math/float2.h"
+#include "math/matrix.h"
 
 #include "scene_object.h"
 
@@ -104,8 +105,10 @@ namespace Baikal
         void ArcballRotateHorizontally(RadeonRays::float3 c, float angle);
         //
         void ArcballRotateVertically(RadeonRays::float3 c, float angle);
-        
-        
+
+        RadeonRays::matrix GetViewMatrix() const;
+        RadeonRays::matrix GetProjectionMatrix() const;
+
     private:
         // Rotate camera around world Z axis
         void Rotate(RadeonRays::float3, float angle);

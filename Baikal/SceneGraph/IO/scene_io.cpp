@@ -5,9 +5,12 @@
 #include "../material.h"
 #include "../light.h"
 #include "../texture.h"
+#include "math/mathutils.h"
 
 
 #include "Utils/tiny_obj_loader.h"
+
+#include <iostream>
 
 namespace Baikal
 {
@@ -157,11 +160,15 @@ namespace Baikal
         std::vector<material_t> objmaterials;
 
         // Try loading file
+        std::cout << "OBJ loading started\n";
         std::string res = LoadObj(objshapes, objmaterials, filename.c_str(), basepath.c_str());
         if (res != "")
         {
             throw std::runtime_error(res);
         }
+
+        std::cout << "OBJ loading finished\n";
+
 
         // Allocate scene
         Scene1* scene(new Scene1);
@@ -183,8 +190,9 @@ namespace Baikal
         }
 
         // Enumerate all shapes in the scene
-        for (int s = 0; s < (int)objshapes.size(); ++s)
+        for (int s = 0; s < 100/*(int)objshapes.size()*/; ++s)
         {
+            std::cout << "Creating mesh (" << s << "/" << (int)objshapes.size() << ")\n";
             // Create empty mesh
             Mesh* mesh = new Mesh();
 
@@ -216,7 +224,7 @@ namespace Baikal
             // Set material
             auto idx = objshapes[s].mesh.material_ids[0];
 
-            if (idx > 0)
+            if (idx >= 0)
             {
                 mesh->SetMaterial(materials[idx]);
             }
@@ -246,13 +254,13 @@ namespace Baikal
 
         ImageBasedLight* ibl = new ImageBasedLight();
         ibl->SetTexture(ibl_texture);
-        ibl->SetMultiplier(10.f);
+        ibl->SetMultiplier(1.f);
         scene->AttachAutoreleaseObject(ibl);
 
         // TODO: temporary code to add directional light
         DirectionalLight* light = new DirectionalLight();
-        light->SetDirection(RadeonRays::normalize(RadeonRays::float3(-1.1f, -0.6f, -0.2f)));
-        light->SetEmittedRadiance(35.f * RadeonRays::float3(1.f, 0.95f, 0.92f));
+        light->SetDirection(RadeonRays::normalize(RadeonRays::float3(-1.1f, -0.6f, -0.4f)));
+        light->SetEmittedRadiance(7.f * RadeonRays::float3(1.f, 0.95f, 0.92f));
         scene->AttachAutoreleaseObject(light);
 
         DirectionalLight* light1 = new DirectionalLight();

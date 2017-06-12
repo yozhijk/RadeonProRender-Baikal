@@ -45,91 +45,10 @@ namespace Baikal
         // Delete API
         IntersectionApi::Delete(m_api);
     }
-    
-    static void SplitMeshesAndInstances(Iterator* shape_iter, std::set<Mesh const*>& meshes, std::set<Instance const*>& instances, std::set<Mesh const*>& excluded_meshes)
-    {
-        // Clear all sets
-        meshes.clear();
-        instances.clear();
-        excluded_meshes.clear();
-        
-        // Prepare instance check lambda
-        auto is_instance = [](Shape const* shape)
-        {
-            if (dynamic_cast<Instance const*>(shape))
-            {
-                return true;
-            }
-            else
-            {
-                return false;
-            }
-        };
-        
-        for (; shape_iter->IsValid(); shape_iter->Next())
-        {
-            auto shape = shape_iter->ItemAs<Shape const>();
-            
-            if (!is_instance(shape))
-            {
-                meshes.emplace(static_cast<Mesh const*>(shape));
-            }
-            else
-            {
-                instances.emplace(static_cast<Instance const*>(shape));
-            }
-        }
-        
-        for (auto& i : instances)
-        {
-            auto base_mesh = static_cast<Mesh const*>(i->GetBaseShape());
-            if (meshes.find(base_mesh) == meshes.cend())
-            {
-                excluded_meshes.emplace(base_mesh);
-            }
-        }
-    }
-    
-    static std::size_t GetShapeIdx(Iterator* shape_iter, Shape const* shape)
-    {
-        std::set<Mesh const*> meshes;
-        std::set<Mesh const*> excluded_meshes;
-        std::set<Instance const*> instances;
-        SplitMeshesAndInstances(shape_iter, meshes, instances, excluded_meshes);
-        
-        std::size_t idx = 0;
-        for (auto& i : meshes)
-        {
-            if (i == shape)
-            {
-                return idx;
-            }
-            
-            ++idx;
-        }
-        
-        for (auto& i : excluded_meshes)
-        {
-            if (i == shape)
-            {
-                return idx;
-            }
-            
-            ++idx;
-        }
-        
-        for (auto& i : instances)
-        {
-            if (i == shape)
-            {
-                return idx;
-            }
-            
-            ++idx;
-        }
-        
-        return -1;
-    }
+
+
+
+
     
     void ClwSceneController::UpdateIntersector(Scene1 const& scene, ClwScene& out) const
     {
@@ -277,9 +196,6 @@ namespace Baikal
         
         // Unmap camera buffer
         m_context.UnmapBuffer(0, out.camera, data);
-        
-        // Drop camera dirty flag
-        camera->SetDirty(false);
     }
     
     void ClwSceneController::UpdateShapes(Scene1 const& scene, Collector& mat_collector, Collector& tex_collector, ClwScene& out) const
@@ -432,9 +348,6 @@ namespace Baikal
             std::fill(matids + num_matids_written, matids + num_matids_written + mesh_num_indices / 3, matidx);
             
             num_matids_written += mesh_num_indices / 3;
-            
-            // Drop dirty flag
-            mesh->SetDirty(false);
         }
         
         // Excluded shapes are handled in almost the same way
@@ -492,9 +405,6 @@ namespace Baikal
             std::fill(matids + num_matids_written, matids + num_matids_written + mesh_num_indices / 3, -1);
             
             num_matids_written += mesh_num_indices / 3;
-            
-            // Drop dirty flag
-            mesh->SetDirty(false);
         }
         
         // Handle instances
@@ -534,9 +444,6 @@ namespace Baikal
             std::fill(matids + num_matids_written, matids + num_matids_written + mesh_num_indices / 3, mat_idx);
             
             num_matids_written += mesh_num_indices / 3;
-            
-            // Drop dirty flag
-            instance->SetDirty(false);
         }
         
         m_context.UnmapBuffer(0, out.vertices, vertices);
@@ -1107,8 +1014,6 @@ namespace Baikal
             default:
             break;
         }
-        
-        material->SetDirty(false);
     }
     
     // Convert Light:: types to ClwScene:: types
@@ -1241,7 +1146,6 @@ namespace Baikal
                 }
                 
                 ++num_lights_written;
-                light->SetDirty(false);
             }
         }
         
