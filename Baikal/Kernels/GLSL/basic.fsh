@@ -318,7 +318,7 @@ void main()
 {
     vec3 V = normalize(CameraPosition - WorldPos);
     vec3 N = Normal;
-    if (dot(V, N) < 0.f)
+    /*if (dot(V, N) < 0.f)
         V = -V;
 
     vec3 DiffuseAlbedoTemp = DiffuseAlbedo;
@@ -346,7 +346,7 @@ void main()
     if (HasIblTexture != -1)
     {
         R += Integrate_IBL(N, T, B, V, Ior, DiffuseAlbedoTemp, GlossAlbedoTemp, DiffuseRoughness, GlossRoughness);
-    }
+    }*/
 
-    gl_FragData[0] = pow(vec4(R, 1.0), vec4(1.0 / 2.2));
+    gl_FragData[0] = 0.5 * N.xyzz + 0.5;//pow(vec4(R, 1.0), vec4(1.0 / 2.2));
 }

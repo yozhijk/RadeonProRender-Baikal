@@ -32,16 +32,12 @@ namespace Baikal
     {
         std::cout << "Shape update started\n";
         // Delete all meshes previously created
-        for (auto& iter : out.shapes)
+        if (out.vertex_buffer != GL_INVALID_ENUM)
         {
-            if (iter.second.num_triangles > 0)
-            {
-                glDeleteBuffers(1, &iter.second.index_buffer);
-                glDeleteBuffers(1, &iter.second.vertex_buffer);
-            }
+            glDeleteBuffers(1, &out.index_buffer);
+            glDeleteBuffers(1, &out.vertex_buffer);
         }
 
-        out.shapes.clear();
 
         std::unique_ptr<Iterator> shape_iter(scene.CreateShapeIterator());
 
@@ -53,26 +49,60 @@ namespace Baikal
         std::set<Instance const*> instances;
         SplitMeshesAndInstances(shape_iter.get(), meshes, instances, excluded_meshes);
 
-        int i = 0;
+        // Calculate space required
+        auto num_indices = 0;
+        auto num_vertices = 0;
         for (auto& iter : meshes)
         {
-            std::cout << "Mesh (" << i++ << "/" << meshes.size() << ")\n";
+            num_indices += iter->GetNumIndices();
+            num_vertices += iter->GetNumVertices();
+        }
+
+        std::cout << "Total number of vertices " << num_vertices << "\n";
+        std::cout << "Total number of indices " << num_indices<< "\n";
+
+        glGenBuffers(1, &out.vertex_buffer); CHECK_GL_ERROR;
+        glGenBuffers(1, &out.index_buffer); CHECK_GL_ERROR;
+
+        glBindBuffer(GL_ARRAY_BUFFER, out.vertex_buffer); CHECK_GL_ERROR;
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, out.index_buffer); CHECK_GL_ERROR;
+
+        glBufferData(GL_ARRAY_BUFFER,
+            sizeof(GlVertex) * num_vertices,
+            nullptr,
+            GL_STATIC_DRAW); CHECK_GL_ERROR;
+
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+            sizeof(std::uint32_t) * num_indices,
+            nullptr,
+            GL_STATIC_DRAW); CHECK_GL_ERROR;
+
+
+        GLint mask = GL_MAP_WRITE_BIT;
+
+        
+        auto num_vertices_written = 0;
+        auto num_indices_written = 0;
+
+        int k = 0;
+        for (auto& iter : meshes)
+        {
+            std::cout << "Mesh (" << k++ << "/" << meshes.size() << ")\n";
             auto mesh = iter;
-
-            GlShapeData new_data;
-            glGenBuffers(1, &new_data.vertex_buffer);
-            glGenBuffers(1, &new_data.index_buffer);
-
-            new_data.transform = mesh->GetTransform().transpose();
-            new_data.num_triangles = mesh->GetNumIndices() / 3;
 
             auto vertex_ptr = mesh->GetVertices();
             auto normal_ptr = mesh->GetNormals();
             auto uv_ptr = mesh->GetUVs();
-
+            auto idx_ptr = mesh->GetIndices();
+            auto start_index = num_vertices_written;
             auto num_vertices = std::min(mesh->GetNumVertices(), mesh->GetNumNormals());
+            auto num_indices = mesh->GetNumIndices();
 
-            std::vector<GlVertex> vertices(num_vertices);
+            auto vertices = (GlVertex*)glMapBufferRange(GL_ARRAY_BUFFER, num_vertices_written * sizeof(GlVertex), 
+                num_vertices * sizeof(GlVertex), mask); CHECK_GL_ERROR;
+            auto indices = (std::uint32_t*)glMapBufferRange(GL_ELEMENT_ARRAY_BUFFER, num_indices_written * sizeof(std::uint32_t),
+                num_indices * sizeof(std::uint32_t), mask); CHECK_GL_ERROR;
+
             for (auto i = 0; i < num_vertices; ++i)
             {
                 vertices[i].p = vertex_ptr[i];
@@ -80,26 +110,23 @@ namespace Baikal
                 vertices[i].uv = uv_ptr[i];
             }
 
-            glBindBuffer(GL_ARRAY_BUFFER, new_data.vertex_buffer); CHECK_GL_ERROR;
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, new_data.index_buffer); CHECK_GL_ERROR;
+            for (auto i = 0; i < mesh->GetNumIndices(); ++i)
+            {
+                indices[i] = idx_ptr[i] + start_index;
+            }
 
-            glBufferData(GL_ARRAY_BUFFER,
-                sizeof(GlVertex) * num_vertices,
-                &vertices[0],
-                GL_STATIC_DRAW); CHECK_GL_ERROR;
+            num_vertices_written += num_vertices;
+            num_indices_written += mesh->GetNumIndices();
 
-            glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-                sizeof(std::uint32_t) * (std::uint32_t)mesh->GetNumIndices(),
-                mesh->GetIndices(),
-                GL_STATIC_DRAW); CHECK_GL_ERROR;
-
-            glBindBuffer(GL_ARRAY_BUFFER, 0);
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-
-            new_data.material_idx = mat_collector.GetItemIndex(mesh->GetMaterial());
-
-            out.shapes[mesh] = new_data;
+            glUnmapBuffer(GL_ARRAY_BUFFER);
+            glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER);
         }
+
+
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+        out.num_indices = num_indices_written;
 
         std::cout << "Shape update finished\n";
     }

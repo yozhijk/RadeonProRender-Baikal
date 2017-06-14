@@ -122,7 +122,10 @@ namespace Baikal
     {
         PerspectiveCamera const* camera;
 
-        std::map<Shape const*, GlShapeData> shapes;
+        GLuint vertex_buffer = GL_INVALID_ENUM;
+        GLuint index_buffer = GL_INVALID_ENUM;
+        GLuint num_indices = 0;
+
         std::vector<GlMaterialData> materials;
         std::vector<GlTexureData> textures;
 

@@ -190,7 +190,7 @@ namespace Baikal
         }
 
         // Enumerate all shapes in the scene
-        for (int s = 0; s < 100/*(int)objshapes.size()*/; ++s)
+        for (int s = 0; s < (int)objshapes.size(); ++s)
         {
             std::cout << "Creating mesh (" << s << "/" << (int)objshapes.size() << ")\n";
             // Create empty mesh

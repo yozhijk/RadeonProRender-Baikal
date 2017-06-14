@@ -97,6 +97,11 @@ ShaderManager::~ShaderManager()
     {
         glDeleteProgram(citer->second);
     }
+
+    for (auto citer = computeshadercache_.cbegin(); citer != computeshadercache_.cend(); ++citer)
+    {
+        glDeleteProgram(citer->second);
+    }
 }
 
 GLuint ShaderManager::CompileProgram(std::string const& name)
@@ -149,6 +154,48 @@ GLuint ShaderManager::CompileProgram(std::string const& name)
     return program;
 }
 
+
+GLuint ShaderManager::CompileComputeProgram(std::string const& name)
+{
+    std::string csname = name + ".csh";
+
+    // Need to wrap the shader program here to be exception-safe
+    std::vector<GLchar> sourcecode;
+
+    LoadFileContents(csname, sourcecode);
+    GLuint compute_shader = CompileShader(sourcecode, GL_COMPUTE_SHADER);
+
+    GLuint program = glCreateProgram();
+
+    glAttachShader(program, compute_shader);
+
+    glDeleteShader(compute_shader);
+
+    glLinkProgram(program);
+
+    GLint result = GL_TRUE;
+    glGetProgramiv(program, GL_LINK_STATUS, &result);
+
+    if (result == GL_FALSE)
+    {
+        GLint length = 0;
+        std::vector<char> log;
+
+        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &length);
+
+        log.resize(length);
+
+        glGetProgramInfoLog(program, length, &result, &log[0]);
+
+        glDeleteProgram(program);
+
+        throw std::runtime_error(std::string(log.begin(), log.end()));
+    }
+
+    return program;
+}
+
+
 GLuint ShaderManager::GetProgram(std::string const& name)
 {
     auto iter = shadercache_.find(name);
@@ -161,6 +208,22 @@ GLuint ShaderManager::GetProgram(std::string const& name)
     {
         GLuint program = CompileProgram(name);
         shadercache_[name] = program;
+        return program;
+    }
+}
+
+GLuint ShaderManager::GetComputeProgram(std::string const& name)
+{
+    auto iter = computeshadercache_.find(name);
+
+    if (iter != computeshadercache_.end())
+    {
+        return iter->second;
+    }
+    else
+    {
+        GLuint program = CompileComputeProgram(name);
+        computeshadercache_[name] = program;
         return program;
     }
 }

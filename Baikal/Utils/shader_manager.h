@@ -46,14 +46,17 @@ public:
     ~ShaderManager();
     
     GLuint GetProgram(std::string const& name);
-    
+    GLuint GetComputeProgram(std::string const& name);
+
 private:
     GLuint CompileProgram(std::string const& name);
+    GLuint CompileComputeProgram(std::string const& name);
     
     ShaderManager(ShaderManager const&);
     ShaderManager& operator = (ShaderManager const&);
     
     std::map<std::string, GLuint> shadercache_;
+    std::map<std::string, GLuint> computeshadercache_;
 };
 
 #endif

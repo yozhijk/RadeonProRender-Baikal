@@ -289,27 +289,28 @@ namespace Baikal
             glUniform1i(ibl_texture_loc, 1); CHECK_GL_ERROR;
         }
 
-        for (auto& iter : gl_scene.shapes)
+        //for (auto& iter : gl_scene.shapes)
         {
-            glUniformMatrix4fv(world_loc, 1, GL_FALSE, &iter.second.transform.m00); CHECK_GL_ERROR;
+            RadeonRays::matrix identity;
+            glUniformMatrix4fv(world_loc, 1, GL_FALSE, &identity.m00); CHECK_GL_ERROR;
 
-            glBindBuffer(GL_ARRAY_BUFFER, iter.second.vertex_buffer); CHECK_GL_ERROR;
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, iter.second.index_buffer); CHECK_GL_ERROR;
+            glBindBuffer(GL_ARRAY_BUFFER, gl_scene.vertex_buffer); CHECK_GL_ERROR;
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gl_scene.index_buffer); CHECK_GL_ERROR;
 
             glVertexAttribPointer(position_attr, 3, GL_FLOAT, GL_FALSE, sizeof(GlVertex), 0); CHECK_GL_ERROR;
             glVertexAttribPointer(normal_attr, 3, GL_FLOAT, GL_FALSE, sizeof(GlVertex), (void*)(sizeof(RadeonRays::float3))); CHECK_GL_ERROR;
             glVertexAttribPointer(texcoord_attr, 2, GL_FLOAT, GL_FALSE, sizeof(GlVertex), (void*)(sizeof(RadeonRays::float3) * 2)); CHECK_GL_ERROR;
 
-            GlMaterialData& material_data(gl_scene.materials[iter.second.material_idx]);
-            glUniform3fv(diffuse_albedo_loc, 1, &material_data.diffuse_color.x); CHECK_GL_ERROR;
-            glUniform3fv(gloss_albedo_loc, 1, &material_data.gloss_color.x); CHECK_GL_ERROR;
-            glUniform1f(diffuse_roughness_loc, material_data.diffuse_roughness); CHECK_GL_ERROR;
-            glUniform1f(gloss_roughness_loc, material_data.gloss_roughness); CHECK_GL_ERROR;
-            glUniform1f(ior_loc, material_data.ior); CHECK_GL_ERROR;
-            glUniform1i(has_diffuse_albedo_texture_loc, material_data.diffuse_texture_idx); CHECK_GL_ERROR;
-            glUniform1i(has_gloss_albedo_texture_loc, material_data.gloss_texture_idx); CHECK_GL_ERROR;
+            //GlMaterialData& material_data(gl_scene.materials[iter.second.material_idx]);
+            //glUniform3fv(diffuse_albedo_loc, 1, &material_data.diffuse_color.x); CHECK_GL_ERROR;
+            //glUniform3fv(gloss_albedo_loc, 1, &material_data.gloss_color.x); CHECK_GL_ERROR;
+            //glUniform1f(diffuse_roughness_loc, material_data.diffuse_roughness); CHECK_GL_ERROR;
+            //glUniform1f(gloss_roughness_loc, material_data.gloss_roughness); CHECK_GL_ERROR;
+            //glUniform1f(ior_loc, material_data.ior); CHECK_GL_ERROR;
+            //glUniform1i(has_diffuse_albedo_texture_loc, material_data.diffuse_texture_idx); CHECK_GL_ERROR;
+            //glUniform1i(has_gloss_albedo_texture_loc, material_data.gloss_texture_idx); CHECK_GL_ERROR;
 
-            if (material_data.diffuse_texture_idx != -1)
+            /*if (material_data.diffuse_texture_idx != -1)
             {
                 auto& texture = gl_scene.textures[material_data.diffuse_texture_idx];
                 glActiveTexture(GL_TEXTURE0); CHECK_GL_ERROR;
@@ -323,14 +324,25 @@ namespace Baikal
                 glActiveTexture(GL_TEXTURE1); CHECK_GL_ERROR;
                 glBindTexture(GL_TEXTURE_2D, texture.texture); CHECK_GL_ERROR;
                 glUniform1i(gloss_albedo_texture_loc, 1); CHECK_GL_ERROR;
-            }
+            }*/
 
-            glDrawElements(GL_TRIANGLES, iter.second.num_triangles * 3, GL_UNSIGNED_INT, nullptr); CHECK_GL_ERROR;
+            glDrawElements(GL_TRIANGLES, gl_scene.num_indices, GL_UNSIGNED_INT, nullptr); CHECK_GL_ERROR;
         }
+
+
+        //{ // launch compute shaders!
+            //glUseProgram(m_shader_manager.GetComputeProgram("../Baikal/Kernels/GLSL/simple")); CHECK_GL_ERROR;
+           // glBindImageTexture(0, m_render_data->frame_buffer_texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F); CHECK_GL_ERROR;
+           // glDispatchCompute((GLuint)m_output->width() / 8, (GLuint)m_output->height() / 8, 1); CHECK_GL_ERROR;
+        //}
+
+        // make sure writing to image has finished before read
+        //glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT); CHECK_GL_ERROR;
+        //glFinish();
+
 
         {
             glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GlOutput*>(m_output)->GetGlFramebuffer()); CHECK_GL_ERROR;
-
 
             GLenum draw_buffers[] = { GL_COLOR_ATTACHMENT0 };
             glDrawBuffers(1, draw_buffers); CHECK_GL_ERROR;
@@ -354,7 +366,6 @@ namespace Baikal
         glBindBuffer(GL_ARRAY_BUFFER, 0); CHECK_GL_ERROR;
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0); CHECK_GL_ERROR;
         glUseProgram(0); CHECK_GL_ERROR;
-
     }
 
     void RsRenderer::SetOutput(OutputType type, Output* output)
