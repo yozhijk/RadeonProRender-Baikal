@@ -64,18 +64,23 @@ namespace Baikal
     corresponding ClwScene class. It also pre-caches ClwScenes and speeds up loading for
     already compiled scenes.
     */
-    struct GlShapeData
+    struct GlBatchData
     {
         GLuint index_buffer;
         GLuint vertex_buffer;
-        GLuint num_triangles;
+        GLuint num_indices;
+        GLuint num_vertices;
+        GLuint num_vertices_written;
+        GLuint num_indices_written;
         GLint material_idx;
         RadeonRays::matrix transform;
 
-        GlShapeData()
-            : index_buffer(0)
-            , vertex_buffer(0)
-            , num_triangles(0)
+        GlBatchData()
+            : index_buffer(GL_INVALID_ENUM)
+            , vertex_buffer(GL_INVALID_ENUM)
+            , num_indices(0)
+            , num_indices_written(0)
+            , num_vertices_written(0)
             , material_idx(-1)
         {
         }
@@ -122,12 +127,9 @@ namespace Baikal
     {
         PerspectiveCamera const* camera;
 
-        GLuint vertex_buffer = GL_INVALID_ENUM;
-        GLuint index_buffer = GL_INVALID_ENUM;
-        GLuint num_indices = 0;
-
         std::vector<GlMaterialData> materials;
         std::vector<GlTexureData> textures;
+        std::map<Material const*, GlBatchData> batches;
 
         GLint ibl_texture_idx;
         GLfloat ibl_multiplier;

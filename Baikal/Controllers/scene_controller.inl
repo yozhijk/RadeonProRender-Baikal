@@ -170,6 +170,19 @@ namespace Baikal
             // Drop all dirty flags for the scene
             if (clear_ditry_flags)
             {
+                auto shape_iter = scene.CreateShapeIterator();
+                auto light_iter = scene.CreateLightIterator();
+
+                DropDirties(shape_iter.get());
+                DropDirties(light_iter.get());
+
+                auto tex_iter = tex_collector.CreateIterator();
+                auto mat_iter = mat_collector.CreateIterator();
+
+                DropDirties(mat_iter.get());
+                DropDirties(tex_iter.get());
+
+                scene.GetCamera()->SetDirty(false);
                 scene.ClearDirtyFlags();
             }
             

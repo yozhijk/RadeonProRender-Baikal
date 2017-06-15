@@ -31,13 +31,12 @@ namespace Baikal
     void GlSceneController::UpdateShapes(Scene1 const& scene, Collector& mat_collector, Collector& tex_collector, GlScene& out) const
     {
         std::cout << "Shape update started\n";
-        // Delete all meshes previously created
-        if (out.vertex_buffer != GL_INVALID_ENUM)
-        {
-            glDeleteBuffers(1, &out.index_buffer);
-            glDeleteBuffers(1, &out.vertex_buffer);
-        }
 
+        for (auto& batch : out.batches)
+        {
+            glDeleteBuffers(1, &batch.second.index_buffer);
+            glDeleteBuffers(1, &batch.second.vertex_buffer);
+        }
 
         std::unique_ptr<Iterator> shape_iter(scene.CreateShapeIterator());
 
@@ -50,39 +49,55 @@ namespace Baikal
         SplitMeshesAndInstances(shape_iter.get(), meshes, instances, excluded_meshes);
 
         // Calculate space required
-        auto num_indices = 0;
-        auto num_vertices = 0;
         for (auto& iter : meshes)
         {
-            num_indices += iter->GetNumIndices();
-            num_vertices += iter->GetNumVertices();
+            auto material = iter->GetMaterial();
+
+            auto batch_iter = out.batches.find(material);
+            if (batch_iter == out.batches.cend())
+            {
+                GlBatchData batch;
+                batch.num_indices = iter->GetNumIndices();
+                batch.num_vertices = iter->GetNumVertices();
+                batch.material_idx = material ? mat_collector.GetItemIndex(material) : -1;
+                out.batches[material] = batch;
+            }
+            else
+            {
+                batch_iter->second.num_indices += iter->GetNumIndices();
+                batch_iter->second.num_vertices += iter->GetNumVertices();
+            }
         }
 
-        std::cout << "Total number of vertices " << num_vertices << "\n";
-        std::cout << "Total number of indices " << num_indices<< "\n";
+        auto mem_usage = 0.f;
 
-        glGenBuffers(1, &out.vertex_buffer); CHECK_GL_ERROR;
-        glGenBuffers(1, &out.index_buffer); CHECK_GL_ERROR;
+        for (auto& batch : out.batches)
+        {
+            glGenBuffers(1, &batch.second.vertex_buffer); CHECK_GL_ERROR;
+            glGenBuffers(1, &batch.second.index_buffer); CHECK_GL_ERROR;
 
-        glBindBuffer(GL_ARRAY_BUFFER, out.vertex_buffer); CHECK_GL_ERROR;
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, out.index_buffer); CHECK_GL_ERROR;
+            glBindBuffer(GL_ARRAY_BUFFER, batch.second.vertex_buffer); CHECK_GL_ERROR;
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, batch.second.index_buffer); CHECK_GL_ERROR;
 
-        glBufferData(GL_ARRAY_BUFFER,
-            sizeof(GlVertex) * num_vertices,
-            nullptr,
-            GL_STATIC_DRAW); CHECK_GL_ERROR;
+            glBufferData(GL_ARRAY_BUFFER,
+                sizeof(GlVertex) * batch.second.num_vertices,
+                nullptr,
+                GL_STATIC_DRAW); CHECK_GL_ERROR;
 
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-            sizeof(std::uint32_t) * num_indices,
-            nullptr,
-            GL_STATIC_DRAW); CHECK_GL_ERROR;
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                sizeof(std::uint32_t) * batch.second.num_indices,
+                nullptr,
+                GL_STATIC_DRAW); CHECK_GL_ERROR;
+
+            std::cout << "Index buffer created (" << batch.second.num_indices * sizeof(std::uint32_t) / 1024.f / 1024.f << "Mb)\n";
+            std::cout << "Vertex buffer created (" << batch.second.num_vertices * sizeof(GlVertex) / 1024.f / 1024.f << "Mb)\n";
+            mem_usage += batch.second.num_indices * sizeof(std::uint32_t) / 1024.f / 1024.f;
+            mem_usage += batch.second.num_vertices * sizeof(GlVertex) / 1024.f / 1024.f;
+        }
+        std::cout << "Mem usage " << mem_usage << "\n";
 
 
-        GLint mask = GL_MAP_WRITE_BIT;
-
-        
-        auto num_vertices_written = 0;
-        auto num_indices_written = 0;
+        GLint mask = GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_RANGE_BIT;
 
         int k = 0;
         for (auto& iter : meshes)
@@ -90,17 +105,23 @@ namespace Baikal
             std::cout << "Mesh (" << k++ << "/" << meshes.size() << ")\n";
             auto mesh = iter;
 
+            auto material = mesh->GetMaterial();
+            auto& batch = out.batches[material];
+
             auto vertex_ptr = mesh->GetVertices();
             auto normal_ptr = mesh->GetNormals();
             auto uv_ptr = mesh->GetUVs();
             auto idx_ptr = mesh->GetIndices();
-            auto start_index = num_vertices_written;
+            auto start_index = batch.num_vertices_written;
             auto num_vertices = std::min(mesh->GetNumVertices(), mesh->GetNumNormals());
             auto num_indices = mesh->GetNumIndices();
 
-            auto vertices = (GlVertex*)glMapBufferRange(GL_ARRAY_BUFFER, num_vertices_written * sizeof(GlVertex), 
+            glBindBuffer(GL_ARRAY_BUFFER, batch.vertex_buffer); CHECK_GL_ERROR;
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, batch.index_buffer); CHECK_GL_ERROR;
+
+            auto vertices = (GlVertex*)glMapBufferRange(GL_ARRAY_BUFFER, batch.num_vertices_written * sizeof(GlVertex), 
                 num_vertices * sizeof(GlVertex), mask); CHECK_GL_ERROR;
-            auto indices = (std::uint32_t*)glMapBufferRange(GL_ELEMENT_ARRAY_BUFFER, num_indices_written * sizeof(std::uint32_t),
+            auto indices = (std::uint32_t*)glMapBufferRange(GL_ELEMENT_ARRAY_BUFFER, batch.num_indices_written * sizeof(std::uint32_t),
                 num_indices * sizeof(std::uint32_t), mask); CHECK_GL_ERROR;
 
             for (auto i = 0; i < num_vertices; ++i)
@@ -115,20 +136,18 @@ namespace Baikal
                 indices[i] = idx_ptr[i] + start_index;
             }
 
-            num_vertices_written += num_vertices;
-            num_indices_written += mesh->GetNumIndices();
+            batch.num_vertices_written += num_vertices;
+            batch.num_indices_written += mesh->GetNumIndices();
 
             glUnmapBuffer(GL_ARRAY_BUFFER);
             glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER);
         }
 
-
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
-        out.num_indices = num_indices_written;
-
         std::cout << "Shape update finished\n";
+        std::cout << "Number of batches : " << out.batches.size() << "\n";
     }
 
     void GlSceneController::UpdateLights(Scene1 const& scene, Collector& mat_collector, Collector& tex_collector, GlScene& out) const
