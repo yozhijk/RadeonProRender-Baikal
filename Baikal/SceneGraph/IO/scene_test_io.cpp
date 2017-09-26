@@ -295,13 +295,13 @@ namespace Baikal
             scene->AttachShape(mesh);
             scene->AttachAutoreleaseObject(mesh);
 
-            SingleBxdf* refract = new SingleBxdf(SingleBxdf::BxdfType::kMicrofacetRefractionGGX);
+            SingleBxdf* refract = new SingleBxdf(SingleBxdf::BxdfType::kMicrofacetRefractionBeckmann);
             refract->SetInputValue("albedo", float4(0.7f, 1.f, 0.7f, 1.f));
             refract->SetInputValue("ior", float4(1.5f, 1.5f, 1.5f, 1.f));
-            refract->SetInputValue("roughness", float4(0.02f, 0.02f, 0.02f, 1.f));
+            refract->SetInputValue("roughness", float4(0.0002f, 0.0002f, 0.0002f, 1.f));
 
 
-            SingleBxdf* spec = new SingleBxdf(SingleBxdf::BxdfType::kMicrofacetGGX);
+            SingleBxdf* spec = new SingleBxdf(SingleBxdf::BxdfType::kMicrofacetBeckmann);
             spec->SetInputValue("albedo", float4(0.7f, 1.f, 0.7f, 1.f));
             spec->SetInputValue("roughness", float4(0.02f, 0.02f, 0.02f, 1.f));
 
@@ -314,7 +314,7 @@ namespace Baikal
             scene->AttachAutoreleaseObject(refract);
             scene->AttachAutoreleaseObject(mix);
 
-            mesh->SetMaterial(mix);
+            mesh->SetMaterial(spec);
 
             Mesh* floor = CreateQuad(
                                      {

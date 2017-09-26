@@ -47,7 +47,7 @@ public:
     static std::uint32_t constexpr kMaxPlatforms = 5;
     static std::uint32_t constexpr kOutputWidth = 256;
     static std::uint32_t constexpr kOutputHeight = 256;
-    static std::uint32_t constexpr kNumIterations = 32;
+    static std::uint32_t constexpr kNumIterations = 256;
 
     virtual void SetUp()
     {
@@ -66,7 +66,7 @@ public:
         auto platform_index = platform_index_option ? (int)atoi(platform_index_option) : 0;
         auto device_index = device_index_option ? (int)atoi(device_index_option) : 0;
         m_generate = generate_option ? true : false;
-        m_tolerance = tolerance_option ? (int)atoi(tolerance_option) : 20;
+        m_tolerance = tolerance_option ? (int)atoi(tolerance_option) : 5;
         m_reference_path = refpath_option ? refpath_option : "ReferenceImages";
         m_output_path = outpath_option ? outpath_option : "OutputImages";
         m_reference_path.append("/");
@@ -201,19 +201,17 @@ public:
         LoadImage(path_to_reference, reference_data);
 
         auto num_values = output_data.size();
-        auto difference = 0u;
+        auto rmse = 0.f;
         for (auto i = 0u; i < num_values; ++i)
         {
-            if (output_data[i] != reference_data[i])
-            {
-                ++difference;
-            }
+            rmse += (output_data[i] - reference_data[i]) * (output_data[i] - reference_data[i]);
         }
 
-        return difference <= m_tolerance;
+        rmse /= output_data.size();
+        rmse = std::sqrt(rmse);
+
+        return rmse <= m_tolerance;
     }
-
-
 
     std::string test_name() const
     {

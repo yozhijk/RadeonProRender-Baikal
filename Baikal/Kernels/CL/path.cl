@@ -30,7 +30,7 @@ typedef struct _Path
     int volume;
     int flags;
     int active;
-    int extra1;
+    int index;
 } Path;
 
 typedef enum _PathFlags
@@ -85,6 +85,16 @@ void Path_Restart(__global Path* path)
 int Path_GetVolumeIdx(__global Path const* path)
 {
     return path->volume;
+}
+
+int Path_GetIndex(__global Path const* path)
+{
+    return path->index;
+}
+
+void Path_SetIndex(__global Path* path, int index)
+{
+    path->index = index;
 }
 
 float3 Path_GetThroughput(__global Path const* path)

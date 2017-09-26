@@ -257,12 +257,13 @@ namespace Baikal
 
         // Set kernel parameters
         int argc = 0;
+        auto rnd = (int)rand_uint();
         genkernel.SetArg(argc++, scene.camera);
         genkernel.SetArg(argc++, output.width());
         genkernel.SetArg(argc++, output.height());
         genkernel.SetArg(argc++, m_estimator->GetOutputIndexBuffer());
         genkernel.SetArg(argc++, m_estimator->GetRayCountBuffer());
-        genkernel.SetArg(argc++, (int)rand_uint());
+        genkernel.SetArg(argc++, rnd);
         genkernel.SetArg(argc++, m_sample_counter);
         genkernel.SetArg(argc++, m_estimator->GetRayBuffer());
         genkernel.SetArg(argc++, m_estimator->GetRandomBuffer(Estimator::RandomBufferType::kRandomSeed));

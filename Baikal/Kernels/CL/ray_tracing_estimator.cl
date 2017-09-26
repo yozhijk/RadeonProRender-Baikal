@@ -35,6 +35,8 @@ THE SOFTWARE.
 #include <../Baikal/Kernels/CL/volumetrics.cl> 
 #include <../Baikal/Kernels/CL/path.cl>
 
+#define SAMPLES_PER_BOUNCE 8
+
 
 KERNEL
 void InitPathData(
@@ -419,115 +421,118 @@ KERNEL void ShadeSurface(
 
         float ndotwi = fabs(dot(diffgeo.n, wi));
 
-        float light_pdf = 0.f;
-        float bxdf_light_pdf = 0.f;
-        float bxdf_pdf = 0.f;
-        float light_bxdf_pdf = 0.f;
-        float selection_pdf = 0.f;
-        float3 radiance = 0.f;
-        float3 lightwo;
-        float3 bxdfwo;
-        float3 wo;
-        float bxdf_weight = 1.f;
-        float light_weight = 1.f;
-
-        int light_idx = Scene_SampleLight(&scene, Sampler_Sample1D(&sampler, SAMPLER_ARGS), &selection_pdf);
-
-        float3 throughput = Path_GetThroughput(path);
-
-        // Sample bxdf
-        float3 bxdf = Bxdf_Sample(&diffgeo, wi, TEXTURE_ARGS, Sampler_Sample2D(&sampler, SAMPLER_ARGS), &bxdfwo, &bxdf_pdf);
-
-        // If we have light to sample we can hopefully do mis 
-        if (light_idx > -1) 
+        for (int sr = 0; sr < SAMPLES_PER_BOUNCE; ++sr)
         {
-            // Sample light
-            float3 le = Light_Sample(light_idx, &scene, &diffgeo, TEXTURE_ARGS, Sampler_Sample2D(&sampler, SAMPLER_ARGS), &lightwo, &light_pdf);
-            light_bxdf_pdf = Bxdf_GetPdf(&diffgeo, wi, normalize(lightwo), TEXTURE_ARGS);
-            light_weight = Light_IsSingular(&scene.lights[light_idx]) ? 1.f : BalanceHeuristic(1, light_pdf * selection_pdf, 1, light_bxdf_pdf);
+            float light_pdf = 0.f;
+            float bxdf_light_pdf = 0.f;
+            float bxdf_pdf = 0.f;
+            float light_bxdf_pdf = 0.f;
+            float selection_pdf = 0.f;
+            float3 radiance = 0.f;
+            float3 lightwo;
+            float3 bxdfwo;
+            float3 wo;
+            float bxdf_weight = 1.f;
+            float light_weight = 1.f;
 
-            // Apply MIS to account for both
-            if (NON_BLACK(le) && light_pdf > 0.0f && !Bxdf_IsSingular(&diffgeo))
+            int light_idx = Scene_SampleLight(&scene, Sampler_Sample1D(&sampler, SAMPLER_ARGS), &selection_pdf);
+
+            float3 throughput = Path_GetThroughput(path);
+
+            // Sample bxdf
+            float3 bxdf = Bxdf_Sample(&diffgeo, wi, TEXTURE_ARGS, Sampler_Sample2D(&sampler, SAMPLER_ARGS), &bxdfwo, &bxdf_pdf);
+
+            // If we have light to sample we can hopefully do mis 
+            if (light_idx > -1)
             {
-                wo = lightwo;
-                float ndotwo = fabs(dot(diffgeo.n, normalize(wo)));
-                radiance = le * ndotwo * Bxdf_Evaluate(&diffgeo, wi, normalize(wo), TEXTURE_ARGS) * throughput * light_weight / light_pdf / selection_pdf;
-            }
-        }
+                // Sample light
+                float3 le = Light_Sample(light_idx, &scene, &diffgeo, TEXTURE_ARGS, Sampler_Sample2D(&sampler, SAMPLER_ARGS), &lightwo, &light_pdf);
+                light_bxdf_pdf = Bxdf_GetPdf(&diffgeo, wi, normalize(lightwo), TEXTURE_ARGS);
+                light_weight = Light_IsSingular(&scene.lights[light_idx]) ? 1.f : BalanceHeuristic(1, light_pdf * selection_pdf, 1, light_bxdf_pdf);
 
-        // If we have some light here generate a shadow ray
-        if (NON_BLACK(radiance))
-        {
-            // Generate shadow ray
-            float3 shadow_ray_o = diffgeo.p + CRAZY_LOW_DISTANCE * s * diffgeo.ng;
-            float3 temp = diffgeo.p + wo - shadow_ray_o;
-            float3 shadow_ray_dir = normalize(temp);
-            float shadow_ray_length = length(temp);
-            int shadow_ray_mask = 0x0000FFFF;
-
-            Ray_Init(shadow_rays + global_id, shadow_ray_o, shadow_ray_dir, shadow_ray_length, 0.f, shadow_ray_mask);
-
-            // Apply the volume to shadow ray if needed
-            int volume_idx = Path_GetVolumeIdx(path);
-            if (volume_idx != -1)
-            {
-                radiance *= Volume_Transmittance(&volumes[volume_idx], &shadow_rays[global_id], shadow_ray_length);
-                radiance += Volume_Emission(&volumes[volume_idx], &shadow_rays[global_id], shadow_ray_length) * throughput;
+                // Apply MIS to account for both
+                if (NON_BLACK(le) && light_pdf > 0.0f && !Bxdf_IsSingular(&diffgeo))
+                {
+                    wo = lightwo;
+                    float ndotwo = fabs(dot(diffgeo.n, normalize(wo)));
+                    radiance = le * ndotwo * Bxdf_Evaluate(&diffgeo, wi, normalize(wo), TEXTURE_ARGS) * throughput * light_weight / light_pdf / selection_pdf;
+                }
             }
 
-            // And write the light sample 
-            light_samples[global_id] = REASONABLE_RADIANCE(radiance);
-        }
-        else
-        {
-            // Otherwise save some intersector cycles
-            Ray_SetInactive(shadow_rays + global_id);
-            light_samples[global_id] = 0;
-        }
+            // If we have some light here generate a shadow ray
+            if (NON_BLACK(radiance))
+            {
+                // Generate shadow ray
+                float3 shadow_ray_o = diffgeo.p + CRAZY_LOW_DISTANCE * s * diffgeo.ng;
+                float3 temp = diffgeo.p + wo - shadow_ray_o;
+                float3 shadow_ray_dir = normalize(temp);
+                float shadow_ray_length = length(temp);
+                int shadow_ray_mask = 0x0000FFFF;
 
-        // Apply Russian roulette
-        float q = max(min(0.5f,
-            // Luminance
-            0.2126f * throughput.x + 0.7152f * throughput.y + 0.0722f * throughput.z), 0.01f);
-        // Only if it is 3+ bounce
-        bool rr_apply = bounce > 3;
-        bool rr_stop = Sampler_Sample1D(&sampler, SAMPLER_ARGS) > q && rr_apply;
+                Ray_Init(shadow_rays + MAX_SAMPLES_PER_BOUNCE * global_id + sr, shadow_ray_o, shadow_ray_dir, shadow_ray_length, 0.f, shadow_ray_mask);
 
-        if (rr_apply)
-        {
-            Path_MulThroughput(path, 1.f / q);
-        }
+                // Apply the volume to shadow ray if needed
+                int volume_idx = Path_GetVolumeIdx(path);
+                if (volume_idx != -1)
+                {
+                    radiance *= Volume_Transmittance(&volumes[volume_idx], &shadow_rays[global_id], shadow_ray_length);
+                    radiance += Volume_Emission(&volumes[volume_idx], &shadow_rays[global_id], shadow_ray_length) * throughput;
+                }
 
-        if (Bxdf_IsSingular(&diffgeo))
-        {
-            Path_SetSpecularFlag(path);
-        }
-        else
-        {
-            Path_ClearSpecularFlag(path);
-        }
+                // And write the light sample 
+                light_samples[MAX_SAMPLES_PER_BOUNCE * global_id + sr] = REASONABLE_RADIANCE(radiance);
+            }
+            else
+            {
+                // Otherwise save some intersector cycles
+                Ray_SetInactive(shadow_rays + MAX_SAMPLES_PER_BOUNCE * global_id + sr);
+                light_samples[MAX_SAMPLES_PER_BOUNCE * global_id + sr] = 0;
+            }
 
-        bxdfwo = normalize(bxdfwo);
-        float3 t = bxdf * fabs(dot(diffgeo.n, bxdfwo));
+            // Apply Russian roulette
+            float q = max(min(0.5f,
+                // Luminance
+                0.2126f * throughput.x + 0.7152f * throughput.y + 0.0722f * throughput.z), 0.01f);
+            // Only if it is 3+ bounce
+            bool rr_apply = bounce > 3;
+            bool rr_stop = Sampler_Sample1D(&sampler, SAMPLER_ARGS) > q && rr_apply;
 
-        // Only continue if we have non-zero throughput & pdf
-        if (NON_BLACK(t) && bxdf_pdf > 0.f && !rr_stop)
-        {
-            // Update the throughput
-            Path_MulThroughput(path, t / bxdf_pdf);
+            if (rr_apply)
+            {
+                Path_MulThroughput(path, 1.f / q);
+            }
 
-            // Generate ray
-            float3 indirect_ray_dir = bxdfwo;
-            float3 indirect_ray_o = diffgeo.p + CRAZY_LOW_DISTANCE * s * diffgeo.ng;
+            if (Bxdf_IsSingular(&diffgeo))
+            {
+                Path_SetSpecularFlag(path);
+            }
+            else
+            {
+                Path_ClearSpecularFlag(path);
+            }
 
-            Ray_Init(indirect_rays + global_id, indirect_ray_o, indirect_ray_dir, CRAZY_HIGH_DISTANCE, 0.f, 0xFFFFFFFF);
-            Ray_SetExtra(indirect_rays + global_id, make_float2(bxdf_pdf, 0.f));
-        }
-        else
-        {
-            // Otherwise kill the path
-            Path_Kill(path);
-            Ray_SetInactive(indirect_rays + global_id);
+            bxdfwo = normalize(bxdfwo);
+            float3 t = bxdf * fabs(dot(diffgeo.n, bxdfwo));
+
+            // Only continue if we have non-zero throughput & pdf
+            if (NON_BLACK(t) && bxdf_pdf > 0.f && !rr_stop)
+            {
+                // Update the throughput
+                Path_MulThroughput(path, t / bxdf_pdf);
+
+                // Generate ray
+                float3 indirect_ray_dir = bxdfwo;
+                float3 indirect_ray_o = diffgeo.p + CRAZY_LOW_DISTANCE * s * diffgeo.ng;
+
+                Ray_Init(indirect_rays + SAMPLES_PER_BOUNCE * global_id + sr, indirect_ray_o, indirect_ray_dir, CRAZY_HIGH_DISTANCE, 0.f, 0xFFFFFFFF);
+                Ray_SetExtra(indirect_rays + SAMPLES_PER_BOUNCE * global_id + sr, make_float2(bxdf_pdf, 0.f));
+            }
+            else
+            {
+                // Otherwise kill the path
+                Path_Kill(path);
+                Ray_SetInactive(indirect_rays + SAMPLES_PER_BOUNCE * global_id + sr);
+            }
         }
     }
 }
