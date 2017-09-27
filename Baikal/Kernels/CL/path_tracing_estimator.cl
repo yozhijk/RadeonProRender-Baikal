@@ -35,6 +35,11 @@ THE SOFTWARE.
 #include <../Baikal/Kernels/CL/volumetrics.cl>
 #include <../Baikal/Kernels/CL/path.cl>
 
+#ifdef BAIKAL_ENABLE_MULTIPLE_LIGHT_SAMPLES
+#define NUM_LIGHT_SAMPLES 4
+#else
+#define NUM_LIGHT_SAMPLES 1
+#endif
 
 KERNEL
 void InitPathData(
@@ -177,51 +182,65 @@ KERNEL void ShadeVolume(
         // Here we know that volume_idx != -1 since this is a precondition
         // for scattering event
         int volume_idx = Path_GetVolumeIdx(path);
-
+        
         // Sample light source
         float pdf = 0.f;
         float selection_pdf = 0.f;
         float3 wo;
-
-        int light_idx = Scene_SampleLight(&scene, Sampler_Sample1D(&sampler, SAMPLER_ARGS), &selection_pdf);
-
+        
         // Here we need fake differential geometry for light sampling procedure
         DifferentialGeometry dg;
         // put scattering position in there (it is along the current ray at isect.distance
         // since EvaluateVolume has put it there
         dg.p = o + wi * Intersection_GetDistance(isects + hit_idx);
-        // Get light sample intencity
-        float3 le = Light_Sample(light_idx, &scene, &dg, TEXTURE_ARGS, Sampler_Sample2D(&sampler, SAMPLER_ARGS), &wo, &pdf);
-
-        // Generate shadow ray
-        float shadow_ray_length = length(wo);
-        Ray_Init(shadow_rays + global_id, dg.p, normalize(wo), shadow_ray_length, 0.f, 0xFFFFFFFF);
-
-        // Evaluate volume transmittion along the shadow ray (it is incorrect if the light source is outside of the
-        // current volume, but in this case it will be discarded anyway since the intersection at the outer bound
-        // of a current volume), so the result is fully correct.
-        float3 tr = Volume_Transmittance(&volumes[volume_idx], &shadow_rays[global_id], shadow_ray_length);
-
-        // Volume emission is applied only if the light source is in the current volume(this is incorrect since the light source might be
-        // outside of a volume and we have to compute fraction of ray in this case, but need to figure out how)
-        float3 r = Volume_Emission(&volumes[volume_idx], &shadow_rays[global_id], shadow_ray_length);
-
-        // This is the estimate coming from a light source
-        // TODO: remove hardcoded phase func and sigma
-        r += tr * le * volumes[volume_idx].sigma_s * PhaseFunction_Uniform(wi, normalize(wo)) / pdf / selection_pdf;
-
-        // Only if we have some radiance compute the visibility ray
-        if (NON_BLACK(tr) && NON_BLACK(r) && pdf > 0.f)
+        
+        for (int ls = 0; ls < NUM_LIGHT_SAMPLES; ++ls)
         {
-            // Put lightsample result
-            light_samples[global_id] = REASONABLE_RADIANCE(r * Path_GetThroughput(path));
-        }
-        else
-        {
-            // Nothing to compute
-            light_samples[global_id] = 0.f;
-            // Otherwise make it incative to save intersector cycles (hopefully)
-            Ray_SetInactive(shadow_rays + global_id);
+            int light_idx = Scene_SampleLight(&scene, Sampler_Sample1D(&sampler, SAMPLER_ARGS), &selection_pdf);
+            
+            // Get light sample intencity
+            float3 le = Light_Sample(light_idx, &scene, &dg, TEXTURE_ARGS, Sampler_Sample2D(&sampler, SAMPLER_ARGS), &wo, &pdf);
+            
+            // Generate shadow ray
+            float shadow_ray_length = length(wo);
+            Ray_Init(shadow_rays + NUM_LIGHT_SAMPLES * global_id + ls,
+                     dg.p, normalize(wo),
+                     shadow_ray_length,
+                     0.f,
+                     0xFFFFFFFF);
+            
+            // Evaluate volume transmittion along the shadow ray (it is incorrect if the light source is outside of the
+            // current volume, but in this case it will be discarded anyway since the intersection at the outer bound
+            // of a current volume), so the result is fully correct.
+            float3 tr = Volume_Transmittance(&volumes[volume_idx],
+                     &shadow_rays[NUM_LIGHT_SAMPLES * global_id + ls],
+                     shadow_ray_length);
+            
+            // Volume emission is applied only if the light source is in the current volume(this is incorrect since the light source might be
+            // outside of a volume and we have to compute fraction of ray in this case, but need to figure out how)
+            float3 r = Volume_Emission(&volumes[volume_idx],
+                     &shadow_rays[NUM_LIGHT_SAMPLES * global_id + ls],
+                     shadow_ray_length);
+            
+            // This is the estimate coming from a light source
+            // TODO: remove hardcoded phase func and sigma
+            r += tr * le * volumes[volume_idx].sigma_s *
+                PhaseFunction_Uniform(wi, normalize(wo)) / pdf / selection_pdf;
+            
+            // Only if we have some radiance compute the visibility ray
+            if (NON_BLACK(tr) && NON_BLACK(r) && pdf > 0.f)
+            {
+                // Put lightsample result
+                light_samples[NUM_LIGHT_SAMPLES * global_id + ls] =
+                    REASONABLE_RADIANCE(r * Path_GetThroughput(path));
+            }
+            else
+            {
+                // Nothing to compute
+                light_samples[NUM_LIGHT_SAMPLES * global_id + ls] = 0.f;
+                // Otherwise make it incative to save intersector cycles (hopefully)
+                Ray_SetInactive(shadow_rays + NUM_LIGHT_SAMPLES * global_id + ls);
+            }
         }
 
 #ifdef MULTISCATTER
@@ -379,9 +398,8 @@ KERNEL void ShadeSurface(
                     float2 extra = Ray_GetExtra(&rays[hit_idx]);
                     float ld = isect.uvwt.w;
                     float denom = fabs(dot(diffgeo.n, wi)) * diffgeo.area;
-                    // TODO: num_lights should be num_emissies instead, presence of analytical lights breaks this code
                     float bxdf_light_pdf = denom > 0.f ? (ld * ld / denom / num_lights) : 0.f;
-                    weight = BalanceHeuristic(1, extra.x, 1, bxdf_light_pdf);
+                    weight = BalanceHeuristic(1, extra.x, NUM_LIGHT_SAMPLES, bxdf_light_pdf);
                 }
 
                 // In this case we hit after an application of MIS process at previous step.
@@ -392,10 +410,14 @@ KERNEL void ShadeSurface(
             }
 
             Path_Kill(path);
-            Ray_SetInactive(shadow_rays + global_id);
             Ray_SetInactive(indirect_rays + global_id);
 
-            light_samples[global_id] = 0.f;
+            for (int ls = 0; ls < NUM_LIGHT_SAMPLES; ++ls)
+            {
+                Ray_SetInactive(shadow_rays + NUM_LIGHT_SAMPLES * global_id + ls);
+                light_samples[NUM_LIGHT_SAMPLES * global_id + ls] = 0.f;
+            }
+            
             return;
         }
 
@@ -430,59 +452,67 @@ KERNEL void ShadeSurface(
         float3 wo;
         float bxdf_weight = 1.f;
         float light_weight = 1.f;
-
-        int light_idx = Scene_SampleLight(&scene, Sampler_Sample1D(&sampler, SAMPLER_ARGS), &selection_pdf);
-
         float3 throughput = Path_GetThroughput(path);
 
         // Sample bxdf
         float3 bxdf = Bxdf_Sample(&diffgeo, wi, TEXTURE_ARGS, Sampler_Sample2D(&sampler, SAMPLER_ARGS), &bxdfwo, &bxdf_pdf);
-
-        // If we have light to sample we can hopefully do mis 
-        if (light_idx > -1) 
+        
+        int light_idx = Scene_SampleLight(&scene, Sampler_Sample1D(&sampler, SAMPLER_ARGS), &selection_pdf);
+        
+        for (int ls = 0; ls < NUM_LIGHT_SAMPLES; ++ls)
         {
-            // Sample light
-            float3 le = Light_Sample(light_idx, &scene, &diffgeo, TEXTURE_ARGS, Sampler_Sample2D(&sampler, SAMPLER_ARGS), &lightwo, &light_pdf);
-            light_bxdf_pdf = Bxdf_GetPdf(&diffgeo, wi, normalize(lightwo), TEXTURE_ARGS);
-            light_weight = Light_IsSingular(&scene.lights[light_idx]) ? 1.f : BalanceHeuristic(1, light_pdf * selection_pdf, 1, light_bxdf_pdf); 
-
-            // Apply MIS to account for both
-            if (NON_BLACK(le) && light_pdf > 0.0f && !Bxdf_IsSingular(&diffgeo))
+            
+            // If we have light to sample we can hopefully do mis
+            if (light_idx > -1)
             {
-                wo = lightwo;
-                float ndotwo = fabs(dot(diffgeo.n, normalize(wo)));
-                radiance = le * ndotwo * Bxdf_Evaluate(&diffgeo, wi, normalize(wo), TEXTURE_ARGS) * throughput * light_weight / light_pdf / selection_pdf;
-            }
-        }
+                // Sample light
+                float3 le = Light_Sample(light_idx, &scene, &diffgeo, TEXTURE_ARGS, Sampler_Sample2D(&sampler, SAMPLER_ARGS), &lightwo, &light_pdf);
+                light_bxdf_pdf = Bxdf_GetPdf(&diffgeo, wi, normalize(lightwo), TEXTURE_ARGS);
+                light_weight = Light_IsSingular(&scene.lights[light_idx]) ? 1.f : BalanceHeuristic(NUM_LIGHT_SAMPLES, light_pdf * selection_pdf, 1, light_bxdf_pdf);
 
-        // If we have some light here generate a shadow ray
-        if (NON_BLACK(radiance))
-        {
-            // Generate shadow ray
-            float3 shadow_ray_o = diffgeo.p + CRAZY_LOW_DISTANCE * s * diffgeo.ng;
-            float3 temp = diffgeo.p + wo - shadow_ray_o;
-            float3 shadow_ray_dir = normalize(temp);
-            float shadow_ray_length = length(temp);
-            int shadow_ray_mask = 0x0000FFFF;
-
-            Ray_Init(shadow_rays + global_id, shadow_ray_o, shadow_ray_dir, shadow_ray_length, 0.f, shadow_ray_mask);
-
-            // Apply the volume to shadow ray if needed
-            int volume_idx = Path_GetVolumeIdx(path);
-            if (volume_idx != -1)
-            {
-                radiance *= Volume_Transmittance(&volumes[volume_idx], &shadow_rays[global_id], shadow_ray_length);
-                radiance += Volume_Emission(&volumes[volume_idx], &shadow_rays[global_id], shadow_ray_length) * throughput;
+                // Apply MIS to account for both
+                if (NON_BLACK(le) && light_pdf > 0.0f && !Bxdf_IsSingular(&diffgeo))
+                {
+                    wo = lightwo;
+                    float ndotwo = fabs(dot(diffgeo.n, normalize(wo)));
+                    radiance = le * ndotwo * Bxdf_Evaluate(&diffgeo, wi, normalize(wo), TEXTURE_ARGS) * throughput * light_weight / light_pdf / selection_pdf / NUM_LIGHT_SAMPLES;
+                }
             }
 
-            // And write the light sample 
-            light_samples[global_id] = REASONABLE_RADIANCE(radiance);
-        }
-        else
-        {
-            // Otherwise save some intersector cycles
-            Ray_SetInactive(shadow_rays + global_id);
-            light_samples[global_id] = 0;
+            // If we have some light here generate a shadow ray
+            if (NON_BLACK(radiance))
+            {
+                // Generate shadow ray
+                float3 shadow_ray_o = diffgeo.p +
+                    CRAZY_LOW_DISTANCE * s * diffgeo.ng;
+                
+                float3 temp = diffgeo.p + wo - shadow_ray_o;
+                float3 shadow_ray_dir = normalize(temp);
+                float shadow_ray_length = length(temp);
+                int shadow_ray_mask = 0x0000FFFF;
+
+                Ray_Init(shadow_rays + NUM_LIGHT_SAMPLES * global_id + ls,
+                         shadow_ray_o, shadow_ray_dir,
+                         shadow_ray_length, 0.f,
+                         shadow_ray_mask);
+
+                // Apply the volume to shadow ray if needed
+                int volume_idx = Path_GetVolumeIdx(path);
+                if (volume_idx != -1)
+                {
+                    radiance *= Volume_Transmittance(&volumes[volume_idx], &shadow_rays[global_id], shadow_ray_length);
+                    radiance += Volume_Emission(&volumes[volume_idx], &shadow_rays[global_id], shadow_ray_length) * throughput;
+                }
+
+                // And write the light sample
+                light_samples[NUM_LIGHT_SAMPLES * global_id + ls] = REASONABLE_RADIANCE(radiance);
+            }
+            else
+            {
+                // Otherwise save some intersector cycles
+                Ray_SetInactive(shadow_rays + NUM_LIGHT_SAMPLES * global_id + ls);
+                light_samples[NUM_LIGHT_SAMPLES * global_id + ls] = 0;
+            }
         }
 
         // Apply Russian roulette
@@ -619,11 +649,14 @@ KERNEL void GatherLightSamples(
 
         // Start collecting samples
         {
-            // If shadow ray didn't hit anything and reached skydome
-            if (shadow_hits[global_id] == -1)
+            for (int ls = 0; ls < NUM_LIGHT_SAMPLES; ++ls)
             {
-                // Add its contribution to radiance accumulator
-                radiance.xyz += light_samples[global_id];
+                // If shadow ray didn't hit anything and reached skydome
+                if (shadow_hits[NUM_LIGHT_SAMPLES * global_id + ls] == -1)
+                {
+                    // Add its contribution to radiance accumulator
+                    radiance.xyz += light_samples[NUM_LIGHT_SAMPLES * global_id + ls];
+                }
             }
         }
 
@@ -650,6 +683,23 @@ KERNEL void RestorePixelIndices(
     if (global_id < *num_elements)
     {
         new_indices[global_id] = prev_indices[compacted_indices[global_id]];
+    }
+}
+
+///< Restore pixel indices after compaction
+KERNEL void MultiplyValue(
+    // Multiplier
+    float multiplier,
+    // Value to multiply
+    GLOBAL int* restrict value
+)
+{
+    int global_id = get_global_id(0);
+    
+    // Handle only working subset
+    if (global_id == 0)
+    {
+        *value = (int)((*value) * multiplier);
     }
 }
 
@@ -741,7 +791,7 @@ KERNEL void ShadeMiss(
             float selection_pdf = Distribution1D_GetPdfDiscreet(env_light_idx, light_distribution);
             float light_pdf = EnvironmentLight_GetPdf(&light, 0, 0, rays[global_id].d.xyz, TEXTURE_ARGS);
             float2 extra = Ray_GetExtra(&rays[global_id]);
-            float weight = BalanceHeuristic(1, extra.x, 1, light_pdf * selection_pdf);
+            float weight = BalanceHeuristic(1, extra.x, NUM_LIGHT_SAMPLES, light_pdf * selection_pdf);
 
             float3 t = Path_GetThroughput(path);
             float4 v = 0.f;

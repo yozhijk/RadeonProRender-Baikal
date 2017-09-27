@@ -179,6 +179,8 @@ namespace Baikal
 
     private:
         void InitPathData(std::size_t size);
+        
+        void MultiplyHitcountValue(float value);
 
         void ShadeSurface(
             ClwScene const& scene,

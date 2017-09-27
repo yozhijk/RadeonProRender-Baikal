@@ -16,6 +16,14 @@
 
 namespace Baikal
 {
+    
+#ifdef BAIKAL_ENABLE_MULTIPLE_LIGHT_SAMPLES
+    static std::uint32_t constexpr kNumLightSamples = 4;
+#else
+    static std::uint32_t constexpr kNumLightSamples = 1;
+#endif
+    
+    
     struct PathTracingEstimator::PathState
     {
         float4 throughput;
@@ -98,9 +106,9 @@ namespace Baikal
         m_render_data->rays[1] = GetContext().CreateBuffer<ray>(size, CL_MEM_READ_WRITE);
         m_render_data->hits = GetContext().CreateBuffer<int>(size, CL_MEM_READ_WRITE);
         m_render_data->intersections = GetContext().CreateBuffer<Intersection>(size, CL_MEM_READ_WRITE);
-        m_render_data->shadowrays = GetContext().CreateBuffer<ray>(size, CL_MEM_READ_WRITE);
-        m_render_data->shadowhits = GetContext().CreateBuffer<int>(size, CL_MEM_READ_WRITE);
-        m_render_data->lightsamples = GetContext().CreateBuffer<float3>(size, CL_MEM_READ_WRITE);
+        m_render_data->shadowrays = GetContext().CreateBuffer<ray>(size * kNumLightSamples, CL_MEM_READ_WRITE);
+        m_render_data->shadowhits = GetContext().CreateBuffer<int>(size * kNumLightSamples, CL_MEM_READ_WRITE);
+        m_render_data->lightsamples = GetContext().CreateBuffer<float3>(size * kNumLightSamples, CL_MEM_READ_WRITE);
         m_render_data->paths = GetContext().CreateBuffer<PathState>(size, CL_MEM_READ_WRITE);
 
         std::vector<std::uint32_t> random_buffer(size);
@@ -223,17 +231,25 @@ namespace Baikal
             // Shade missing rays
             if (pass == 0)
                 ShadeBackground(scene, pass, num_estimates, output, use_output_indices);
-
+            
+#ifdef BAIKAL_ENABLE_MULTIPLE_LIGHT_SAMPLES
+            MultiplyHitcountValue(kNumLightSamples);
+#endif
+            
             // Intersect shadow rays
             GetIntersector()->QueryOcclusion(
                 m_render_data->fr_shadowrays, 
                 m_render_data->fr_hitcount, 
-                (std::uint32_t)num_estimates,
+                (std::uint32_t)num_estimates * kNumLightSamples,
                 m_render_data->fr_shadowhits, 
                 nullptr, 
                 nullptr
             );
-
+            
+#ifdef BAIKAL_ENABLE_MULTIPLE_LIGHT_SAMPLES
+            MultiplyHitcountValue(1.f / kNumLightSamples);
+#endif
+            
             // Gather light samples and account for visibility
             GatherLightSamples(scene, pass, num_estimates, output, use_output_indices);
 
@@ -255,6 +271,19 @@ namespace Baikal
 
         {
             GetContext().Launch1D(0, ((size + 63) / 64) * 64, 64, init_kernel);
+        }
+    }
+    
+    void PathTracingEstimator::MultiplyHitcountValue(float value)
+    {
+        auto multiply_kernel = GetKernel("MultiplyValue");
+        
+        int argc = 0;
+        multiply_kernel.SetArg(argc++, value);
+        multiply_kernel.SetArg(argc++, m_render_data->hitcount);
+    
+        {
+            GetContext().Launch1D(0, 64, 64, multiply_kernel);
         }
     }
 
