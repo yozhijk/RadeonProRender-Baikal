@@ -36,6 +36,7 @@ namespace Baikal
     * position_sensitivity - Higher the sensitivity the more it smoothes out depending on position difference.
     Required AOVs in input set:
     * kColor
+    * kAlbedo
     * kWorldShadingNormal
     * kWorldPosition
     */

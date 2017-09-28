@@ -371,7 +371,6 @@ namespace Baikal
                     Update(update);
                     m_gl->Render(m_window);
                     update = UpdateGui();
-                    update = true;
 
                     glfwSwapBuffers(m_window);
                     glfwPollEvents();

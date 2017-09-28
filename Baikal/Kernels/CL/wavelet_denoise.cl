@@ -200,8 +200,11 @@ void WaveletFilter_main(
                 const float color_dist2         = dot(delta_color, delta_color);
 
                 const float position_weight     = exp(-position_dist2 / sigma_position);
-                const float normal_weight       = pow(max(0.f, dot(sample_normal, normal)), sigma_normal);
+                const float normal_weight       = exp(-dot(sample_normal, normal) / 5.f);
                 const float color_weight        = exp(-color_dist2 / sigma_color);
+
+                // Gives more sharp image then exp, but produces dark sillhoutes if color buffer contains more than 1 spp
+                //const float normal_weight       = pow(max(0.f, dot(sample_normal, normal)), sigma_normal);
 
                 const float lum_value           = exp(-fabs(lum_color - dot(luminance, sample_color)) / (sigma_variance * variance + DENOM_EPS));
                 const float luminance_weight    = isnan(lum_value) ? 1.f : lum_value;
@@ -530,7 +533,7 @@ void TemporalAccumulation_main(
         const float3 normal = normals[idx].xyz / max(normals[idx].w, 1.f);
         const float3 color = in_out_colors[idx].xyz / max(in_out_colors[idx].w, 1.f);
 
-        if (length(position_xyz) > 0 && !any(isnan(in_out_colors[idx])))
+        if (length(position_xyz) > 0 && !any(isnan(color)))
         {
             const float2 motion     = motions[idx].xy;
             const int2 buffer_size  = make_int2(width, height);
@@ -587,7 +590,9 @@ void TemporalAccumulation_main(
 
                 // Temporal accumulation of color
                 float3 prev_color = SampleWithGeometryTest(prev_colors, (float4)(color, 1.f), position_xyz, normal, positions, normals, prev_positions, prev_normals, buffer_size, uv, prev_uv).xyz;
+
                 in_out_colors[idx].xyz = mix(prev_color, color, FRAME_BLEND_ALPHA);
+                in_out_colors[idx].w = 1.0f;
             }
             else
             {
