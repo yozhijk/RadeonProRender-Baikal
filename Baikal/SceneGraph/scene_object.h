@@ -30,6 +30,7 @@
 
 #include <string>
 #include <memory>
+#include <atomic>
 
 namespace Baikal
 {
@@ -37,7 +38,9 @@ namespace Baikal
     {
     public:
         using Ptr = std::shared_ptr<SceneObject>;
-        
+
+        static std::atomic<std::uint32_t> s_id;
+
         // Destructor
         virtual ~SceneObject() = 0;
 
@@ -49,22 +52,30 @@ namespace Baikal
         // Set & get name
         void SetName(std::string const& name);
         std::string GetName() const;
-        
+
+        // ID
+        std::uint32_t GetId() const { return m_id;  }
+
+        bool operator < (SceneObject const& rhs) const { return GetId() < rhs.GetId(); }
+
         SceneObject(SceneObject const&) = delete;
         SceneObject& operator = (SceneObject const&) = delete;
-        
+
     protected:
         // Constructor
         SceneObject();
-        
+
     private:
         mutable bool m_dirty;
         
         std::string m_name;
+
+        std::uint32_t m_id;
     };
     
     inline SceneObject::SceneObject()
     : m_dirty(false)
+    , m_id(s_id.fetch_add(1))
     {
     }
     

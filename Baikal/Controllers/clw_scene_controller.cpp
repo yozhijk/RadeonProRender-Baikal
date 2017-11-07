@@ -21,6 +21,16 @@ using namespace RadeonRays;
 
 namespace Baikal
 {
+    template<typename T> struct Less {
+
+        bool operator ()(typename T::Ptr const& v1, typename T::Ptr const& v2) const {
+            return v1->GetId() < v2->GetId();
+        }
+    };
+
+    using MeshSet = std::set<Mesh::Ptr, Less<Mesh>>;
+    using InstanceSet = std::set<Instance::Ptr, Less<Instance>>;
+
     static std::size_t align16(std::size_t value)
     {
         return (value + 0xF) / 0x10 * 0x10;
@@ -54,13 +64,13 @@ namespace Baikal
     {
     }
 
-    static void SplitMeshesAndInstances(Iterator& shape_iter, std::set<Mesh::Ptr>& meshes, std::set<Instance::Ptr>& instances, std::set<Mesh::Ptr>& excluded_meshes)
+    static void SplitMeshesAndInstances(Iterator& shape_iter, MeshSet& meshes, InstanceSet& instances, MeshSet& excluded_meshes)
     {
         // Clear all sets
         meshes.clear();
         instances.clear();
         excluded_meshes.clear();
-        
+
         // Prepare instance check lambda
         auto is_instance = [](Shape::Ptr shape)
         {
@@ -100,9 +110,9 @@ namespace Baikal
 
     static std::size_t GetShapeIdx(Iterator& shape_iter, Shape::Ptr shape)
     {
-        std::set<Mesh::Ptr> meshes;
-        std::set<Mesh::Ptr> excluded_meshes;
-        std::set<Instance::Ptr> instances;
+        MeshSet meshes;
+        MeshSet excluded_meshes;
+        InstanceSet instances;
         SplitMeshesAndInstances(shape_iter, meshes, instances, excluded_meshes);
         
         std::size_t idx = 0;
@@ -164,13 +174,13 @@ namespace Baikal
         }
         
         // Split all shapes into meshes and instances sets.
-        std::set<Mesh::Ptr> meshes;
+        MeshSet meshes;
         // Excluded shapes are shapes which are not in the scene,
         // but references by at least one instance.
-        std::set<Mesh::Ptr> excluded_meshes;
-        std::set<Instance::Ptr> instances;
+        MeshSet excluded_meshes;
+        InstanceSet instances;
         SplitMeshesAndInstances(*shape_iter, meshes, instances, excluded_meshes);
-        
+
         // Keep shape->rr shape association for
         // instance base shape lookup.
         std::map<Shape::Ptr, RadeonRays::Shape*> rr_shapes;
@@ -264,11 +274,11 @@ namespace Baikal
         }
 
         // Split all shapes into meshes and instances sets.
-        std::set<Mesh::Ptr> meshes;
+        MeshSet meshes;
         // Excluded shapes are shapes which are not in the scene,
         // but references by at least one instance.
-        std::set<Mesh::Ptr> excluded_meshes;
-        std::set<Instance::Ptr> instances;
+        MeshSet excluded_meshes;
+        InstanceSet instances;
         SplitMeshesAndInstances(*shape_iter, meshes, instances, excluded_meshes);
 
         auto rr_iter = out.isect_shapes.begin();
@@ -360,12 +370,12 @@ namespace Baikal
         
         auto shape_iter = scene.CreateShapeIterator();
         
-        // Sort shapes into meshes and instances sets.
-        std::set<Mesh::Ptr> meshes;
-        // Excluded meshes are meshes which are not in the scene,
-        // but are references by at least one instance.
-        std::set<Mesh::Ptr> excluded_meshes;
-        std::set<Instance::Ptr> instances;
+        // Split all shapes into meshes and instances sets.
+        MeshSet meshes;
+        // Excluded shapes are shapes which are not in the scene,
+        // but references by at least one instance.
+        MeshSet excluded_meshes;
+        InstanceSet instances;
         SplitMeshesAndInstances(*shape_iter, meshes, instances, excluded_meshes);
         
         // Calculate GPU array sizes. Do that only for meshes,
@@ -464,7 +474,7 @@ namespace Baikal
             shape.startvtx = static_cast<int>(num_vertices_written);
             shape.startidx = static_cast<int>(num_indices_written);
             shape.start_material_idx = static_cast<int>(num_matids_written);
-            
+
             auto transform = mesh->GetTransform();
             shape.transform.m0 = { transform.m00, transform.m01, transform.m02, transform.m03 };
             shape.transform.m1 = { transform.m10, transform.m11, transform.m12, transform.m13 };
@@ -628,12 +638,12 @@ namespace Baikal
 
         auto shape_iter = scene.CreateShapeIterator();
 
-        // Sort shapes into meshes and instances sets.
-        std::set<Mesh::Ptr> meshes;
-        // Excluded meshes are meshes which are not in the scene,
-        // but are references by at least one instance.
-        std::set<Mesh::Ptr> excluded_meshes;
-        std::set<Instance::Ptr> instances;
+        // Split all shapes into meshes and instances sets.
+        MeshSet meshes;
+        // Excluded shapes are shapes which are not in the scene,
+        // but references by at least one instance.
+        MeshSet excluded_meshes;
+        InstanceSet instances;
         SplitMeshesAndInstances(*shape_iter, meshes, instances, excluded_meshes);
 
         // Calculate GPU array sizes. Do that only for meshes,

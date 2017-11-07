@@ -10,6 +10,7 @@
 #include "Utils/log.h"
 
 #include <fstream>
+#include <unordered_map>
 
 namespace Baikal
 {
@@ -21,18 +22,8 @@ namespace Baikal
     Scene1::Ptr SceneBinaryIo::LoadScene(std::string const& filename, std::string const& basepath) const
     {
         auto scene = Scene1::Create();
-        auto image_io(ImageIo::CreateImageIo());
 
-        std::map<std::string, Material*> mats;
-
-        struct less
-        {
-            bool operator ()(RadeonRays::float3 const& v1, RadeonRays::float3 const& v2) const {
-                return v1.x < v2.x;
-            }
-        };
-
-        std::map<RadeonRays::float3, Material::Ptr, less> c2mats;
+        auto image_io = ImageIo::CreateImageIo();
 
         std::string full_path = filename;
 
@@ -42,6 +33,8 @@ namespace Baikal
         {
             throw std::runtime_error("Cannot open file for reading");
         }
+
+        std::unordered_map<std::string, Material::Ptr> mats;
 
         std::uint32_t num_meshes = 0;
         in.read((char*)&num_meshes, sizeof(std::uint32_t));
@@ -96,64 +89,33 @@ namespace Baikal
 
 
             {
-                std::uint32_t flag = 0;
-                in.read(reinterpret_cast<char*>(&flag), sizeof(flag));
+                std::uint32_t size = 0;
+                in.read(reinterpret_cast<char*>(&size), sizeof(size));
 
-                if (!flag)
+                std::vector<char> buff(size);
+                in.read(&buff[0], sizeof(char) * size);
+
+                std::string name(buff.cbegin(), buff.cend());
+
+                Material::Ptr material = nullptr;
+                auto iter = mats.find(name);
+
+                if (iter != mats.cend())
                 {
-                    RadeonRays::float3 albedo;
-                    in.read(reinterpret_cast<char*>(&albedo.x), sizeof(RadeonRays::float3));
-
-                    /*auto iter = c2mats.find(albedo);
-
-                    if (iter != c2mats.cend())
-                    {
-                        material = iter->second;
-                    }
-                    else
-                    {
-                        material = new SingleBxdf(SingleBxdf::BxdfType::kLambert);
-                        material->SetInputValue("albedo", albedo);
-                        c2mats[albedo] = material;
-                        scene->AttachAutoreleaseObject(material);
-                    }*/
+                    material = iter->second;
                 }
                 else
                 {
-                    std::uint32_t size = 0;
-                    in.read(reinterpret_cast<char*>(&size), sizeof(size));
-
-                    std::vector<char> buff(size);
-                    in.read(&buff[0], sizeof(char) * size);
-
-                    //std::string name(buff.cbegin(), buff.cend());
-
-                    //auto iter = mats.find(name);
-
-                    //if (iter != mats.cend())
-                    //{
-                    //    material = iter->second;
-                    //}
-                    //else
-                    //{
-                    //    LogInfo("Loading texture ", name, "\n");
-                    //    auto texture = image_io->LoadImage(basepath + name);
-                    //    //material = new SingleBxdf(SingleBxdf::BxdfType::kLambert);
-                    //    //material->SetInputValue("albedo", texture);
-                    //    //mats[name] = material;
-                    //    //scene->AttachAutoreleaseObject(texture);
-                    //    //scene->AttachAutoreleaseObject(material);
-                    //}
-
+                    material = SingleBxdf::Create(SingleBxdf::BxdfType::kLambert);
+                    material->SetName(name);
+                    mats[name] = material;
                 }
 
-                mesh->SetMaterial(nullptr);
+                mesh->SetMaterial(material);
             }
 
             scene->AttachShape(mesh);
         }
-
-
 
         auto  ibl_texture = image_io->LoadImage("../Resources/Textures/Canopus_Ground_4k.exr");
 
@@ -179,6 +141,7 @@ namespace Baikal
 
     void SceneBinaryIo::SaveScene(Scene1 const& scene, std::string const& filename, std::string const& basepath) const
     {
+        std::cout << "Saving scene...\n";
         std::string full_path = filename;
 
         std::ofstream out(full_path, std::ios::binary | std::ios::out);
@@ -189,6 +152,7 @@ namespace Baikal
         }
 
         auto default_material = SingleBxdf::Create(SingleBxdf::BxdfType::kLambert);
+        default_material->SetName("default_material");
 
         auto num_shapes = (std::uint32_t)scene.GetNumShapes();
         out.write((char*)&num_shapes, sizeof(std::uint32_t));
@@ -199,15 +163,25 @@ namespace Baikal
         {
             auto mesh = shape_iter->ItemAs<Mesh>();
             auto num_indices = (std::uint32_t)mesh->GetNumIndices();
+            auto num_vertices = (std::uint32_t)mesh->GetNumVertices();
+            auto num_normals = (std::uint32_t)mesh->GetNumNormals();
+            auto num_uvs = (std::uint32_t)mesh->GetNumUVs();
+
+            std::cout << "Saving mesh " << mesh->GetName() << " " << num_indices <<
+                " " << num_vertices <<
+                " " << num_normals <<
+                " " << num_uvs << "\n";
+
+
             out.write((char*)&num_indices, sizeof(std::uint32_t));
 
-            auto num_vertices = (std::uint32_t)mesh->GetNumVertices();
+
             out.write((char*)&num_vertices, sizeof(std::uint32_t));
 
-            auto num_normals = (std::uint32_t)mesh->GetNumNormals();
+
             out.write((char*)&num_normals, sizeof(std::uint32_t));
 
-            auto num_uvs = (std::uint32_t)mesh->GetNumUVs();
+
             out.write((char*)&num_uvs, sizeof(std::uint32_t));
 
             out.write((char const*)mesh->GetIndices(), mesh->GetNumIndices() * sizeof(std::uint32_t));
@@ -222,39 +196,19 @@ namespace Baikal
                 material = default_material;
             }
 
-            auto diffuse = std::dynamic_pointer_cast<SingleBxdf>(material);
-
-            if (!diffuse)
             {
-                diffuse = std::dynamic_pointer_cast<SingleBxdf>(material->GetInputValue("base_material").mat_value);
-            }
+                auto material_name = material->GetName();
 
-            if (!diffuse)
-            {
-                throw std::runtime_error("Material not supported");
-            }
+                if (material_name.empty())
+                    material_name = "default_material";
 
-            auto albedo = diffuse->GetInputValue("albedo");
+                auto size = static_cast<std::uint32_t>(material_name.size());
 
-            if (albedo.type == Material::InputType::kFloat4)
-            {
-                std::uint32_t flag = 0;
-                out.write(reinterpret_cast<char const*>(&flag), sizeof(flag));
-                out.write(reinterpret_cast<char const*>(&albedo.float_value.x), sizeof(RadeonRays::float3));
-            }
-            else
-            {
-                std::uint32_t flag = 1;
-
-                auto name = albedo.tex_value->GetName();
-                //LogInfo("Saving texture ", name, "\n");
-                auto size = name.size();
-
-                out.write(reinterpret_cast<char const*>(&flag), sizeof(flag));
                 out.write(reinterpret_cast<char const*>(&size), sizeof(size));
-                out.write(name.c_str(), sizeof(char) * size);
+                out.write(material_name.c_str(), sizeof(char) * size);
             }
-
         }
+
+        std::cout << "Done...\n";
     }
 }
